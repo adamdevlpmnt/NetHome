@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>HomeNetwork</title>
+
+  <!-- PWA & Mobile Meta Tags -->
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#0e1117">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="HomeNetwork">
+  <link rel="icon" type="image/svg+xml" href="/static/icons/icon.svg">
+  <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
+
+  <!-- Chart.js pour les graphiques de consommation -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
+  <!-- Feather Icons pour des icônes ultra-légères et nettes -->
+  <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
+
+  <!-- Feuille de styles WiFiman Dark -->
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+
+  <!-- Entête Principale -->
+  <header class="app-header">
+    <div class="header-title-box">
+      <h1 id="pageTitle">Network Latency</h1>
+      <div class="live-badge">
+        <span class="pulse-dot"></span>
+        <span id="refreshStatus">En direct</span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <button class="btn-icon" id="btnRefresh" title="Actualiser la latence">
+        <i data-feather="refresh-cw"></i>
+      </button>
+      <button class="btn-icon" id="btnAddTarget" title="Ajouter une cible">
+        <i data-feather="plus"></i>
+      </button>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Bannière invitation installation PWA (Smartphone & Bureau) -->
+    <div class="install-banner" id="pwaBanner">
+      <div>
+        <strong style="font-size: 0.9rem; display: block;">Installer HomeNetwork</strong>
+        <span style="font-size: 0.75rem; opacity: 0.85;">Accès direct en plein écran comme une application</span>
+      </div>
+      <button class="btn-primary" id="btnInstallPwa" style="padding: 6px 12px; font-size: 0.8rem;">Installer</button>
+    </div>
+
+    <!-- ONGLET 1 : NETWORK LATENCY (STYLE WIFIMAN) -->
+    <section id="tabLatency" class="tab-content active">
+      <div class="latency-header-bar">
+        <span>Cibles & Passerelle</span>
+        <span>Latence</span>
+      </div>
+
+      <div class="target-list" id="targetList">
+        <!-- Rempli dynamiquement en JS -->
+        <div style="text-align: center; padding: 40px 0; color: var(--text-muted);">
+          Chargement des mesures de latence...
+        </div>
+      </div>
+    </section>
+
+    <!-- ONGLET 2 : CONSOMMATION & BANDE PASSANTE -->
+    <section id="tabBandwidth" class="tab-content">
+      <!-- Débits instantanés en direct -->
+      <div class="speed-cards-row">
+        <div class="speed-card">
+          <div class="speed-label">
+            <i data-feather="arrow-down-circle" style="width: 14px; height: 14px; color: var(--color-cyan);"></i>
+            Débit Réception
+          </div>
+          <div class="speed-val down" id="liveDownSpeed">0.0 Kbps</div>
+        </div>
+        <div class="speed-card">
+          <div class="speed-label">
+            <i data-feather="arrow-up-circle" style="width: 14px; height: 14px; color: var(--color-purple);"></i>
+            Débit Envoi
+          </div>
+          <div class="speed-val up" id="liveUpSpeed">0.0 Kbps</div>
+        </div>
+      </div>
+
+      <!-- Synthèse Consommation (Aujourd'hui, Mois, Année) -->
+      <div class="summary-cards-grid">
+        <div class="summary-card">
+          <div class="summary-period">Aujourd'hui</div>
+          <div class="summary-total" id="sumTodayTotal">0 Mo</div>
+          <div class="summary-split">
+            <span class="d" id="sumTodayDown">↓ 0</span>
+            <span class="u" id="sumTodayUp">↑ 0</span>
+          </div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-period">Ce Mois</div>
+          <div class="summary-total" id="sumMonthTotal">0 Mo</div>
+          <div class="summary-split">
+            <span class="d" id="sumMonthDown">↓ 0</span>
+            <span class="u" id="sumMonthUp">↑ 0</span>
+          </div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-period">Cette Année</div>
+          <div class="summary-total" id="sumYearTotal">0 Mo</div>
+          <div class="summary-split">
+            <span class="d" id="sumYearDown">↓ 0</span>
+            <span class="u" id="sumYearUp">↑ 0</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Filtres de Date -->
+      <div class="date-filter-section">
+        <div class="quick-filter-pills">
+          <button class="filter-pill active" data-filter="today">Aujourd'hui</button>
+          <button class="filter-pill" data-filter="7days">7 derniers jours</button>
+          <button class="filter-pill" data-filter="30days">30 derniers jours</button>
+          <button class="filter-pill" data-filter="year">Cette année</button>
+          <button class="filter-pill" data-filter="custom">Personnalisé</button>
+        </div>
+
+        <div class="custom-date-inputs" id="customDateBox" style="display: none;">
+          <input type="date" id="filterStartDate" title="Date de début">
+          <input type="date" id="filterEndDate" title="Date de fin">
+          <button class="btn-primary" id="btnApplyFilter">Filtrer</button>
+        </div>
+      </div>
+
+      <!-- Graphique d'historique -->
+      <div class="chart-container-box">
+        <canvas id="bandwidthChart"></canvas>
+      </div>
+    </section>
+
+    <!-- ONGLET 3 : SPEEDTEST OOKLA (SERVEUR ALGÉRIE TÉLÉCOM) -->
+    <section id="tabSpeedtest" class="tab-content">
+      <!-- Badge Serveur Actif -->
+      <div class="speedtest-server-badge">
+        <i data-feather="server" style="width: 15px; height: 15px; color: var(--color-blue);"></i>
+        <div>
+          <strong id="stServerName">Algérie Télécom - 10G</strong>
+          <span>Alger, Algérie (ID: 68856)</span>
+        </div>
+      </div>
+
+      <!-- Bouton d'action central Speedtest (Style Moderne) -->
+      <div class="speedtest-hero-box" id="speedtestHeroBox">
+        <button class="speedtest-go-btn" id="btnStartSpeedtest">
+          <div class="go-circle-inner">
+            <span class="go-text">GO</span>
+            <span class="go-sub">SPEEDTEST</span>
+          </div>
+        </button>
+        <div class="speedtest-stage-text" id="speedtestStage">Appuyez sur GO pour tester votre connexion</div>
+      </div>
+
+      <!-- Tachymètre et Courbe en direct (Replica App Ookla) -->
+      <div class="speedtest-live-dashboard" id="speedtestLiveDashboard" style="display: none;">
+        <!-- Barre d'état haute (Ping, Gigue, Phase) -->
+        <div class="st-live-top-bar">
+          <div class="st-live-ping-box">
+            <span>Ping <strong id="stLivePing">-- ms</strong></span>
+            <span>Jitter <strong id="stLiveJitter">-- ms</strong></span>
+          </div>
+          <div class="st-phase-badge down" id="stLivePhaseBadge">
+            <i data-feather="arrow-down" id="stPhaseIcon" style="width: 13px; height: 13px;"></i>
+            <span id="stPhaseText">DOWNLOAD</span>
+          </div>
+        </div>
+
+        <!-- Grand Affichage Tachymètre Numérique -->
+        <div class="st-live-speed-display">
+          <span class="st-live-speed-num" id="stLiveSpeedNum">0.0</span>
+          <span class="st-live-speed-unit">Mbps</span>
+        </div>
+
+        <!-- Graphique Courbe Spline Animée Ookla -->
+        <div class="st-canvas-wrap">
+          <canvas id="speedtestLiveCanvas" height="130"></canvas>
+        </div>
+
+        <!-- Barre de progression continue -->
+        <div class="st-progress-track">
+          <div class="st-progress-fill" id="stProgressBar"></div>
+        </div>
+        <div class="speedtest-stage-text" id="speedtestLiveStageText">Mesure en cours...</div>
+      </div>
+
+      <!-- Résultat Détaillé -->
+
+      <div class="speedtest-result-card" id="speedtestResultCard" style="display: none;">
+        <div class="st-main-speeds">
+          <div class="st-speed-col">
+            <span class="st-label"><i data-feather="arrow-down" style="width: 14px; color: var(--color-cyan);"></i> DOWNLOAD</span>
+            <span class="st-num down" id="stDownloadVal">--</span>
+            <span class="st-unit">Mbps</span>
+            <span class="st-loaded-lat" id="stDownloadLat">Latence: -- ms</span>
+          </div>
+          <div class="st-divider"></div>
+          <div class="st-speed-col">
+            <span class="st-label"><i data-feather="arrow-up" style="width: 14px; color: var(--color-purple);"></i> UPLOAD</span>
+            <span class="st-num up" id="stUploadVal">--</span>
+            <span class="st-unit">Mbps</span>
+            <span class="st-loaded-lat" id="stUploadLat">Latence: -- ms</span>
+          </div>
+        </div>
+
+        <div class="st-metrics-grid">
+          <div class="st-metric-item">
+            <span class="m-label">Ping</span>
+            <span class="m-val" id="stPingVal">-- ms</span>
+          </div>
+          <div class="st-metric-item">
+            <span class="m-label">Jitter</span>
+            <span class="m-val" id="stJitterVal">-- ms</span>
+          </div>
+          <div class="st-metric-item">
+            <span class="m-label">Perte paquets</span>
+            <span class="m-val" id="stLossVal">0%</span>
+          </div>
+        </div>
+
+        <div class="st-info-footer">
+          <div>
+            <div id="stIspInfo" style="font-size: 0.8rem; font-weight: 500;">Algerie Telecom</div>
+            <div id="stIpInfo" style="font-size: 0.72rem; color: var(--text-dim);">IP: 105.100.4.253</div>
+          </div>
+          <a id="stShareLink" href="#" target="_blank" class="btn-secondary" style="font-size: 0.75rem; text-decoration: none; display: flex; align-items: center; gap: 4px;">
+            <span>Résultat Ookla</span>
+            <i data-feather="external-link" style="width: 12px; height: 12px;"></i>
+          </a>
+        </div>
+      </div>
+
+      <!-- Historique des tests passés -->
+      <div style="margin-top: 24px;">
+        <h3 style="font-size: 0.95rem; font-weight: 600; margin-bottom: 10px; color: var(--text-muted);">Historique des Speedtests</h3>
+        <div id="speedtestHistoryList"></div>
+      </div>
+    </section>
+
+    <!-- ONGLET 4 : GESTION DES CIBLES & SYSTÈME -->
+    <section id="tabSettings" class="tab-content">
+      <div class="targets-manage-header">
+        <h2 style="font-size: 1rem; font-weight: 600;">Cibles surveillées</h2>
+        <button class="btn-primary" id="btnAddNewTarget" style="font-size: 0.8rem; padding: 6px 12px;">+ Ajouter</button>
+      </div>
+      <div id="manageTargetsList">
+        <!-- Rempli dynamiquement -->
+      </div>
+
+      <div style="margin-top: 24px;">
+        <h2 style="font-size: 1rem; font-weight: 600; margin-bottom: 12px;">Interfaces Réseau Détectées</h2>
+        <div id="interfacesList"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- Barre de Navigation Inférieure (Style Application Mobile) -->
+  <nav class="bottom-nav">
+    <button class="nav-item active" data-tab="tabLatency">
+      <i data-feather="activity"></i>
+      <span>Latence</span>
+    </button>
+    <button class="nav-item" data-tab="tabSpeedtest">
+      <i data-feather="zap"></i>
+      <span>Speedtest</span>
+    </button>
+    <button class="nav-item" data-tab="tabBandwidth">
+      <i data-feather="bar-chart-2"></i>
+      <span>Conso</span>
+    </button>
+    <button class="nav-item" data-tab="tabSettings">
+      <i data-feather="sliders"></i>
+      <span>Cibles</span>
+    </button>
+  </nav>
+
+
+  <!-- Modale : Ajouter une Cible de Ping -->
+  <div class="modal-overlay" id="targetModal">
+    <div class="modal-box">
+      <div class="modal-header">
+        <h3 style="font-size: 1.05rem; font-weight: 600;">Nouvelle destination</h3>
+        <button class="btn-icon" id="btnCloseModal"><i data-feather="x"></i></button>
+      </div>
+      <form id="addTargetForm">
+        <div class="form-group">
+          <label for="targetName">Nom de la cible</label>
+          <input type="text" id="targetName" placeholder="Ex: Mon NAS, Serveur Cloud" required>
+        </div>
+        <div class="form-group">
+          <label for="targetHost">Hôte ou IP</label>
+          <input type="text" id="targetHost" placeholder="Ex: 192.168.1.50 ou google.fr" required>
+        </div>
+        <div class="form-group">
+          <label for="targetIcon">Icône</label>
+          <select id="targetIcon">
+            <option value="globe">Globe (Web général)</option>
+            <option value="router">Routeur / Passerelle</option>
+            <option value="server">Serveur / NAS</option>
+            <option value="dns">Service DNS</option>
+            <option value="microsoft">Microsoft</option>
+            <option value="xbox">Xbox</option>
+            <option value="reddit">Reddit</option>
+            <option value="cloudflare">Cloudflare</option>
+            <option value="google">Google</option>
+          </select>
+        </div>
+        <div class="modal-actions">
+          <button type="button" class="btn-secondary" id="btnCancelModal">Annuler</button>
+          <button type="submit" class="btn-primary">Enregistrer</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <script src="/static/js/app.js"></script>
+</body>
+</html>

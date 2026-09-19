@@ -1,0 +1,38 @@
+version: '3.8'
+
+services:
+  homenetwork:
+    image: homenetwork:latest
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: homenetwork
+    restart: unless-stopped
+
+    # Mode réseau hôte obligatoire pour TrueNAS SCALE :
+    # Permet de capturer les interfaces physiques réelles (psutil),
+    # de communiquer directement avec la passerelle sans surcouche NAT
+    # et d'assurer des débits Speedtest 10G maximum.
+    network_mode: host
+
+    # Capacités réseau pour autoriser les paquets ICMP ping bruts
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
+
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+      - BANDWIDTH_POLL_INTERVAL=10
+      - DEFAULT_SERVER_ID=68856
+      - TZ=Africa/Algiers
+
+    volumes:
+      # Montage sur le dataset ZFS de TrueNAS SCALE (ex: /mnt/pool/appdata/homenetwork/data)
+      - ./data:/app/data
+
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/api/speedtest/status || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
