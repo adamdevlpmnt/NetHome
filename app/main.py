@@ -72,7 +72,13 @@ async def get_manifest():
         return FileResponse(str(manifest_path), media_type="application/manifest+json")
     raise HTTPException(status_code=404, detail="Manifest not found")
 
+# Route ultra-rapide pour sonder la latence entre le smartphone (5G/Wi-Fi) et le serveur TrueNAS
+@app.get("/api/ping")
+async def ping_probe():
+    return {"status": "pong"}
+
 # --- API Latence Réseau (Style WiFiman) ---
+
 
 @app.get("/api/latency")
 async def get_network_latency():

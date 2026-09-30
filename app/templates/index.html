@@ -56,8 +56,25 @@
 
     <!-- ONGLET 1 : NETWORK LATENCY (STYLE WIFIMAN) -->
     <section id="tabLatency" class="tab-content active">
+      <!-- Sélecteur de Source : Serveur Maison vs Cet Appareil (5G/Wi-Fi) -->
+      <div class="source-selector-bar">
+        <button class="source-pill active" id="btnSourceServer" data-source="server">
+          <i data-feather="home" style="width: 14px; height: 14px;"></i>
+          <span>Serveur (Maison)</span>
+        </button>
+        <button class="source-pill" id="btnSourceClient" data-source="client">
+          <i data-feather="smartphone" style="width: 14px; height: 14px;"></i>
+          <span>Cet Appareil (5G/Wi-Fi)</span>
+        </button>
+      </div>
+
+      <div class="client-mode-notice" id="clientModeNotice" style="display: none;">
+        <i data-feather="wifi" style="width: 14px; height: 14px; color: var(--color-cyan);"></i>
+        <span>Latence mesurée en direct depuis le réseau actuel de votre appareil (4G/5G/Wi-Fi).</span>
+      </div>
+
       <div class="latency-header-bar">
-        <span>Cibles & Passerelle</span>
+        <span id="latencyHeaderTitle">Cibles & Passerelle</span>
         <span>Latence</span>
       </div>
 
@@ -134,6 +151,20 @@
         </div>
       </div>
 
+      <!-- Synthèse Dynamique sur la Plage Filtrée -->
+      <div class="period-summary-card" id="periodSummaryCard">
+        <div class="period-header">
+          <span class="period-badge" id="periodRangeBadge">Période active</span>
+          <span class="period-label">Consommation cumulée</span>
+        </div>
+        <div class="period-total" id="periodTotalVal">0 Mo</div>
+        <div class="period-breakdown">
+          <span class="period-down" id="periodDownVal">↓ 0 Mo</span>
+          <span class="period-divider">•</span>
+          <span class="period-up" id="periodUpVal">↑ 0 Mo</span>
+        </div>
+      </div>
+
       <!-- Graphique d'historique -->
       <div class="chart-container-box">
         <canvas id="bandwidthChart"></canvas>
@@ -162,7 +193,7 @@
         <div class="speedtest-stage-text" id="speedtestStage">Appuyez sur GO pour tester votre connexion</div>
       </div>
 
-      <!-- Tachymètre et Courbe en direct (Replica App Ookla) -->
+      <!-- Tachymètre et Jauge Demi-Cercle (Authentic Ookla App Replica) -->
       <div class="speedtest-live-dashboard" id="speedtestLiveDashboard" style="display: none;">
         <!-- Barre d'état haute (Ping, Gigue, Phase) -->
         <div class="st-live-top-bar">
@@ -171,31 +202,33 @@
             <span>Jitter <strong id="stLiveJitter">-- ms</strong></span>
           </div>
           <div class="st-phase-badge down" id="stLivePhaseBadge">
-            <i data-feather="arrow-down" id="stPhaseIcon" style="width: 13px; height: 13px;"></i>
+            <i data-feather="arrow-down" id="stPhaseIcon" style="width: 12px; height: 12px;"></i>
             <span id="stPhaseText">DOWNLOAD</span>
           </div>
         </div>
 
-        <!-- Grand Affichage Tachymètre Numérique -->
-        <div class="st-live-speed-display">
-          <span class="st-live-speed-num" id="stLiveSpeedNum">0.0</span>
-          <span class="st-live-speed-unit">Mbps</span>
+        <!-- Jauge Tachymétrique en Demi-Cercle avec Graduations et Aiguille -->
+        <div class="st-gauge-container">
+          <canvas id="speedtestGaugeCanvas" width="340" height="220"></canvas>
+          <div class="st-gauge-overlay">
+            <div class="st-gauge-speed-num" id="stLiveSpeedNum">0.0</div>
+            <div class="st-gauge-unit">Mbps</div>
+          </div>
         </div>
 
-        <!-- Graphique Courbe Spline Animée Ookla -->
+        <!-- Courbe Spline Animée Ookla sous la jauge -->
         <div class="st-canvas-wrap">
-          <canvas id="speedtestLiveCanvas" height="130"></canvas>
+          <canvas id="speedtestLiveCanvas" height="85"></canvas>
         </div>
 
         <!-- Barre de progression continue -->
         <div class="st-progress-track">
           <div class="st-progress-fill" id="stProgressBar"></div>
         </div>
-        <div class="speedtest-stage-text" id="speedtestLiveStageText">Mesure en cours...</div>
+        <div class="speedtest-stage-text" id="speedtestLiveStageText">Connexion au serveur...</div>
       </div>
 
       <!-- Résultat Détaillé -->
-
       <div class="speedtest-result-card" id="speedtestResultCard" style="display: none;">
         <div class="st-main-speeds">
           <div class="st-speed-col">
@@ -264,25 +297,26 @@
     </section>
   </main>
 
-  <!-- Barre de Navigation Inférieure (Style Application Mobile) -->
+  <!-- Barre de Navigation Inférieure (Style Application iOS Moderne) -->
   <nav class="bottom-nav">
     <button class="nav-item active" data-tab="tabLatency">
-      <i data-feather="activity"></i>
+      <div class="nav-icon-wrap"><i data-feather="activity"></i></div>
       <span>Latence</span>
     </button>
     <button class="nav-item" data-tab="tabSpeedtest">
-      <i data-feather="zap"></i>
+      <div class="nav-icon-wrap"><i data-feather="zap"></i></div>
       <span>Speedtest</span>
     </button>
     <button class="nav-item" data-tab="tabBandwidth">
-      <i data-feather="bar-chart-2"></i>
+      <div class="nav-icon-wrap"><i data-feather="bar-chart-2"></i></div>
       <span>Conso</span>
     </button>
     <button class="nav-item" data-tab="tabSettings">
-      <i data-feather="sliders"></i>
+      <div class="nav-icon-wrap"><i data-feather="sliders"></i></div>
       <span>Cibles</span>
     </button>
   </nav>
+
 
 
   <!-- Modale : Ajouter une Cible de Ping -->

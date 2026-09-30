@@ -4,6 +4,7 @@ let bandwidthChart = null;
 let latencyInterval = null;
 let summaryInterval = null;
 let deferredPrompt = null;
+let latencySource = "server"; // 'server' (TrueNAS) ou 'client' (Appareil actuel 5G/Wi-Fi)
 
 // Initialisation au chargement
 document.addEventListener("DOMContentLoaded", () => {
@@ -12,6 +13,7 @@ document.addEventListener("DOMContentLoaded", () => {
   initTabs();
   initModals();
   initDateFilters();
+  initSourceSelector();
 
   // Chargements initiaux
   fetchLatency();
@@ -24,14 +26,21 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchSpeedtestHistory();
 
   // Intervalles de rafraîchissement
-  latencyInterval = setInterval(fetchLatency, 5000);
+  latencyInterval = setInterval(() => {
+    if (latencySource === "client") {
+      fetchClientLatency();
+    } else {
+      fetchLatency();
+    }
+  }, 5000);
   summaryInterval = setInterval(fetchBandwidthSummary, 3000);
 
   // Boutons d'actualisation manuelle
   document.getElementById("btnRefresh").addEventListener("click", () => {
     const icon = document.querySelector("#btnRefresh i");
     if (icon) icon.classList.add("spin");
-    fetchLatency().finally(() => {
+    const promise = latencySource === "client" ? fetchClientLatency() : fetchLatency();
+    promise.finally(() => {
       setTimeout(() => { if (icon) icon.classList.remove("spin"); }, 600);
     });
   });
@@ -124,13 +133,134 @@ function getTargetIconHtml(iconType) {
   }
 }
 
-// --- 1. Latence Réseau (WiFiman Style) ---
+// --- 1. Sélecteur de Source & Latence Réseau (WiFiman Style) ---
+function initSourceSelector() {
+  const btnServer = document.getElementById("btnSourceServer");
+  const btnClient = document.getElementById("btnSourceClient");
+  const notice = document.getElementById("clientModeNotice");
+  const title = document.getElementById("latencyHeaderTitle");
+
+  if (!btnServer || !btnClient) return;
+
+  btnServer.addEventListener("click", () => {
+    if (latencySource === "server") return;
+    latencySource = "server";
+    btnServer.classList.add("active");
+    btnClient.classList.remove("active");
+    if (notice) notice.style.display = "none";
+    if (title) title.innerText = "Cibles & Passerelle (Serveur)";
+    fetchLatency();
+  });
+
+  btnClient.addEventListener("click", () => {
+    if (latencySource === "client") return;
+    latencySource = "client";
+    btnClient.classList.add("active");
+    btnServer.classList.remove("active");
+    if (notice) notice.style.display = "flex";
+    if (title) title.innerText = "Cibles (Depuis cet appareil)";
+    fetchClientLatency();
+  });
+}
+
+async function probeClientUrl(url, timeoutMs = 3500) {
+  const start = performance.now();
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+    const sep = url.includes("?") ? "&" : "?";
+    await fetch(`${url}${sep}_t=${Date.now()}`, {
+      method: "HEAD",
+      mode: "no-cors",
+      cache: "no-store",
+      signal: controller.signal
+    });
+    clearTimeout(timer);
+    return Math.max(1, Math.round(performance.now() - start));
+  } catch (e) {
+    return null;
+  }
+}
+
+async function fetchClientLatency() {
+  const clientTargets = [
+    {
+      id: "srv",
+      name: "Serveur Maison (TrueNAS)",
+      host: window.location.hostname || "192.168.1.x",
+      icon: "server",
+      url: "/api/ping"
+    },
+    {
+      id: "cf",
+      name: "Cloudflare (1.1.1.1)",
+      host: "1.1.1.1",
+      icon: "cloudflare",
+      url: "https://1.1.1.1/cdn-cgi/trace"
+    },
+    {
+      id: "goog",
+      name: "Google (Web & CDN)",
+      host: "google.com",
+      icon: "google",
+      url: "https://www.google.com/generate_204"
+    },
+    {
+      id: "ms",
+      name: "Microsoft Services",
+      host: "bing.com",
+      icon: "microsoft",
+      url: "https://www.bing.com/favicon.ico"
+    }
+  ];
+
+  const container = document.getElementById("targetList");
+  if (!container.querySelector(".client-target-card")) {
+    const placeholders = clientTargets.map(t => ({
+      name: t.name,
+      host: t.host,
+      icon: t.icon,
+      display_latency: "Mesure...",
+      status_color: "var(--text-dim)",
+      is_client: true
+    }));
+    renderLatencyTargets(placeholders);
+  }
+
+  const results = await Promise.all(clientTargets.map(async t => {
+    const lat = await probeClientUrl(t.url);
+    let color = "#ef4444";
+    let display = "Échec";
+    if (lat !== null) {
+      display = `${lat} ms`;
+      if (lat < 40) color = "#10b981";
+      else if (lat < 90) color = "#38bdf8";
+      else if (lat < 160) color = "#f59e0b";
+      else color = "#ef4444";
+    }
+    return {
+      name: t.name,
+      host: t.host,
+      icon: t.icon,
+      display_latency: display,
+      status_color: color,
+      is_client: true
+    };
+  }));
+
+  if (latencySource === "client") {
+    renderLatencyTargets(results);
+  }
+}
+
 async function fetchLatency() {
   try {
     const res = await fetch("/api/latency");
     if (!res.ok) return;
     const data = await res.json();
-    renderLatencyTargets(data.targets);
+    if (latencySource === "server") {
+      renderLatencyTargets(data.targets);
+    }
   } catch (err) {
     console.error("Erreur récupération latence:", err);
   }
@@ -146,8 +276,9 @@ function renderLatencyTargets(targets) {
   let html = "";
   targets.forEach(t => {
     const iconHtml = getTargetIconHtml(t.icon);
+    const clientClass = t.is_client ? " client-target-card" : "";
     html += `
-      <div class="target-card">
+      <div class="target-card${clientClass}">
         <div class="target-left">
           <div class="target-icon-wrap">${iconHtml}</div>
           <div class="target-info">
@@ -252,9 +383,43 @@ async function fetchBandwidthHistory(filterType, customStart = null, customEnd =
     if (!res.ok) return;
     const data = await res.json();
     renderBandwidthChart(data.history, data.group_by);
+    updatePeriodSummary(data.history, filterType, customStart, customEnd);
   } catch (err) {
     console.error("Erreur historique:", err);
   }
+}
+
+function updatePeriodSummary(history, filterType, customStart = null, customEnd = null) {
+  let totalRecv = 0;
+  let totalSent = 0;
+  if (history && Array.isArray(history)) {
+    history.forEach(item => {
+      totalRecv += item.recv || 0;
+      totalSent += item.sent || 0;
+    });
+  }
+  const totalCombined = totalRecv + totalSent;
+
+  let badgeText = "Période active";
+  if (filterType === "today") badgeText = "Aujourd'hui";
+  else if (filterType === "7days") badgeText = "7 derniers jours";
+  else if (filterType === "30days") badgeText = "30 derniers jours";
+  else if (filterType === "year") badgeText = `Année ${new Date().getFullYear()}`;
+  else if (filterType === "custom") {
+    badgeText = (customStart && customEnd) ? `Du ${customStart} au ${customEnd}` : "Période personnalisée";
+  }
+
+  const card = document.getElementById("periodSummaryCard");
+  const badge = document.getElementById("periodRangeBadge");
+  const totalVal = document.getElementById("periodTotalVal");
+  const downVal = document.getElementById("periodDownVal");
+  const upVal = document.getElementById("periodUpVal");
+
+  if (card) card.style.display = "block";
+  if (badge) badge.innerText = badgeText;
+  if (totalVal) totalVal.innerText = formatBytes(totalCombined);
+  if (downVal) downVal.innerText = `↓ ${formatBytes(totalRecv)}`;
+  if (upVal) upVal.innerText = `↑ ${formatBytes(totalSent)}`;
 }
 
 function renderBandwidthChart(history, groupBy) {
@@ -455,8 +620,185 @@ function escapeHtml(text) {
 
 // --- 5. Speedtest Ookla (Serveur Algérie Télécom - ID 68856) ---
 let speedtestPollTimer = null;
+let gaugeAnimFrame = null;
+let gaugeCurrentSpeed = 0;
+let gaugeTargetSpeed = 0;
+let gaugeCurrentPhase = "download";
+
+const SPEED_SCALE = [0, 1, 5, 10, 25, 50, 100, 250, 500, 1000];
+
+function speedToAngle(mbps) {
+  // Semi-circle speedometer: 135 deg (0.75 PI) à 405 deg (2.25 PI) -> 270 deg
+  const startAngle = 0.75 * Math.PI;
+  const endAngle = 2.25 * Math.PI;
+  const totalAngle = endAngle - startAngle;
+
+  if (mbps <= 0) return startAngle;
+  if (mbps >= 1000) return endAngle;
+
+  for (let i = 0; i < SPEED_SCALE.length - 1; i++) {
+    if (mbps >= SPEED_SCALE[i] && mbps <= SPEED_SCALE[i + 1]) {
+      const segFraction = (mbps - SPEED_SCALE[i]) / (SPEED_SCALE[i + 1] - SPEED_SCALE[i]);
+      const segAngle = totalAngle / (SPEED_SCALE.length - 1);
+      return startAngle + (i + segFraction) * segAngle;
+    }
+  }
+  return endAngle;
+}
+
+function initGaugeAnimation() {
+  if (gaugeAnimFrame) cancelAnimationFrame(gaugeAnimFrame);
+
+  function renderLoop() {
+    const diff = gaugeTargetSpeed - gaugeCurrentSpeed;
+    if (Math.abs(diff) > 0.05) {
+      gaugeCurrentSpeed += diff * 0.14;
+    } else {
+      gaugeCurrentSpeed = gaugeTargetSpeed;
+    }
+
+    const canvas = document.getElementById("speedtestGaugeCanvas");
+    if (canvas) {
+      drawOoklaGauge(canvas, gaugeCurrentSpeed, gaugeCurrentPhase);
+    }
+    gaugeAnimFrame = requestAnimationFrame(renderLoop);
+  }
+  gaugeAnimFrame = requestAnimationFrame(renderLoop);
+}
+
+function drawOoklaGauge(canvas, speed, phase) {
+  const ctx = canvas.getContext("2d");
+  const width = canvas.width;
+  const height = canvas.height;
+  ctx.clearRect(0, 0, width, height);
+
+  const cx = width / 2;
+  const cy = height - 52;
+  const radius = 118;
+  const startAngle = 0.75 * Math.PI;
+  const endAngle = 2.25 * Math.PI;
+  const totalAngle = endAngle - startAngle;
+
+  const isUp = phase === "upload";
+  const mainColor = isUp ? "#a855f7" : "#00f0ff";
+  const glowColor = isUp ? "rgba(168, 85, 247, 0.45)" : "rgba(0, 240, 255, 0.45)";
+
+  // 1. Arc de fond subtil
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, radius, startAngle, endAngle);
+  ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+  ctx.lineWidth = 5;
+  ctx.lineCap = "round";
+  ctx.stroke();
+  ctx.restore();
+
+  // 2. Graduations & Labels de vitesse (0, 1, 5, 10, 25, 50, 100, 250, 500, 1k)
+  const numSteps = SPEED_SCALE.length;
+  for (let i = 0; i < numSteps; i++) {
+    const angle = startAngle + (i / (numSteps - 1)) * totalAngle;
+    const cos = Math.cos(angle);
+    const sin = Math.sin(angle);
+
+    // Graduation principale
+    const tickInner = radius - 8;
+    const tickOuter = radius + 2;
+    ctx.beginPath();
+    ctx.moveTo(cx + cos * tickInner, cy + sin * tickInner);
+    ctx.lineTo(cx + cos * tickOuter, cy + sin * tickOuter);
+    ctx.strokeStyle = "rgba(255, 255, 255, 0.38)";
+    ctx.lineWidth = 1.8;
+    ctx.stroke();
+
+    // Étiquette numérique
+    const labelRadius = radius - 20;
+    const lx = cx + cos * labelRadius;
+    const ly = cy + sin * labelRadius;
+    const text = SPEED_SCALE[i] >= 1000 ? "1k" : SPEED_SCALE[i].toString();
+
+    ctx.save();
+    ctx.font = "600 10px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+    ctx.fillStyle = "#64748b";
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, lx, ly);
+    ctx.restore();
+
+    // Sous-graduations
+    if (i < numSteps - 1) {
+      const nextAngle = startAngle + ((i + 1) / (numSteps - 1)) * totalAngle;
+      const midAngle = (angle + nextAngle) / 2;
+      const mcos = Math.cos(midAngle);
+      const msin = Math.sin(midAngle);
+      ctx.beginPath();
+      ctx.moveTo(cx + mcos * (radius - 5), cy + msin * (radius - 5));
+      ctx.lineTo(cx + mcos * (radius + 1), cy + msin * (radius + 1));
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
+      ctx.lineWidth = 1;
+      ctx.stroke();
+    }
+  }
+
+  // 3. Arc Actif Lumineux
+  const currentAngle = speedToAngle(speed);
+  if (currentAngle > startAngle) {
+    ctx.save();
+    ctx.shadowColor = mainColor;
+    ctx.shadowBlur = 14;
+    ctx.beginPath();
+    ctx.arc(cx, cy, radius, startAngle, currentAngle);
+    ctx.strokeStyle = mainColor;
+    ctx.lineWidth = 5.5;
+    ctx.lineCap = "round";
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // 4. Aiguille Tachymétrique Ookla
+  const needleAngle = currentAngle;
+  const needleLen = radius - 14;
+  const needleBase = 5;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(needleAngle);
+
+  ctx.shadowColor = glowColor;
+  ctx.shadowBlur = 10;
+
+  ctx.beginPath();
+  ctx.moveTo(0, -needleBase);
+  ctx.lineTo(needleLen, 0);
+  ctx.lineTo(0, needleBase);
+  ctx.lineTo(-12, 0);
+  ctx.closePath();
+
+  const needleGrad = ctx.createLinearGradient(0, 0, needleLen, 0);
+  needleGrad.addColorStop(0, "#ffffff");
+  needleGrad.addColorStop(1, mainColor);
+  ctx.fillStyle = needleGrad;
+  ctx.fill();
+
+  // Pivot central
+  ctx.beginPath();
+  ctx.arc(0, 0, 9, 0, Math.PI * 2);
+  ctx.fillStyle = "#1e293b";
+  ctx.fill();
+  ctx.strokeStyle = mainColor;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+
+  // Point blanc au centre
+  ctx.beginPath();
+  ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
+  ctx.fillStyle = "#ffffff";
+  ctx.fill();
+
+  ctx.restore();
+}
 
 function initSpeedtest() {
+  initGaugeAnimation();
   const btnStart = document.getElementById("btnStartSpeedtest");
   if (btnStart) {
     btnStart.addEventListener("click", () => {
@@ -469,14 +811,14 @@ function drawOoklaWave(canvas, points, phase) {
   if (!canvas || !canvas.parentElement) return;
   const ctx = canvas.getContext("2d");
   const width = canvas.width = canvas.parentElement.clientWidth;
-  const height = canvas.height = canvas.parentElement.clientHeight || 130;
+  const height = canvas.height = canvas.parentElement.clientHeight || 85;
 
   ctx.clearRect(0, 0, width, height);
 
   // Lignes de grille horizontales subtiles
   ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
   ctx.lineWidth = 1;
-  for (let y = 25; y < height; y += 30) {
+  for (let y = 20; y < height; y += 25) {
     ctx.beginPath();
     ctx.moveTo(0, y);
     ctx.lineTo(width, y);
@@ -485,16 +827,14 @@ function drawOoklaWave(canvas, points, phase) {
 
   if (!points || points.length === 0) return;
 
-  // Calcul du plafond dynamique
   const maxVal = Math.max(25, ...points) * 1.15;
   const isUp = phase === "upload";
   const strokeColor = isUp ? "#a855f7" : "#00f0ff";
   const glowColor = isUp ? "rgba(168, 85, 247, 0.45)" : "rgba(0, 240, 255, 0.45)";
 
-  // Coordonnées lissées
   const coords = points.map((p, i) => {
     const x = (i / Math.max(1, points.length - 1)) * width;
-    const y = height - (p / maxVal) * (height - 20) - 8;
+    const y = height - (p / maxVal) * (height - 18) - 6;
     return { x, y };
   });
 
@@ -502,7 +842,6 @@ function drawOoklaWave(canvas, points, phase) {
     coords.push({ x: width, y: coords[0].y });
   }
 
-  // Remplissage avec dégradé néon vertical
   const grad = ctx.createLinearGradient(0, 0, 0, height);
   grad.addColorStop(0, glowColor);
   grad.addColorStop(1, "rgba(10, 13, 20, 0.0)");
@@ -523,12 +862,11 @@ function drawOoklaWave(canvas, points, phase) {
   ctx.fillStyle = grad;
   ctx.fill();
 
-  // Courbe spline supérieure lumineuse
   ctx.save();
   ctx.shadowColor = strokeColor;
   ctx.shadowBlur = 12;
   ctx.strokeStyle = strokeColor;
-  ctx.lineWidth = 3.5;
+  ctx.lineWidth = 3;
   ctx.beginPath();
   ctx.moveTo(coords[0].x, coords[0].y);
   for (let i = 0; i < coords.length - 1; i++) {
@@ -541,13 +879,12 @@ function drawOoklaWave(canvas, points, phase) {
   ctx.stroke();
   ctx.restore();
 
-  // Point lumineux sur le dernier échantillon
   const last = coords[coords.length - 1];
   ctx.save();
   ctx.shadowColor = strokeColor;
   ctx.shadowBlur = 14;
   ctx.beginPath();
-  ctx.arc(last.x, last.y, 4.5, 0, Math.PI * 2);
+  ctx.arc(last.x, last.y, 4, 0, Math.PI * 2);
   ctx.fillStyle = "#ffffff";
   ctx.fill();
   ctx.restore();
@@ -566,7 +903,11 @@ async function startSpeedtestAction() {
   resultCard.style.display = "none";
 
   speedNum.innerText = "0.0";
+  gaugeCurrentSpeed = 0;
+  gaugeTargetSpeed = 0;
+  gaugeCurrentPhase = "download";
   progressBar.style.width = "0%";
+
   if (canvas) {
     const ctx = canvas.getContext("2d");
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -614,6 +955,7 @@ async function pollSpeedtestStatus() {
 
       const speed = data.current_speed_mbps || 0;
       speedNum.innerText = speed.toFixed(1);
+      gaugeTargetSpeed = speed;
 
       if (data.current_ping != null) livePing.innerText = `${data.current_ping} ms`;
       if (data.current_jitter != null) liveJitter.innerText = `${data.current_jitter} ms`;
@@ -621,19 +963,22 @@ async function pollSpeedtestStatus() {
       stageText.innerText = data.stage || "Mesure en cours...";
 
       if (data.phase === "upload") {
+        gaugeCurrentPhase = "upload";
         phaseBadge.className = "st-phase-badge up";
         phaseText.innerText = "UPLOAD";
-        speedNum.className = "st-live-speed-num up-phase";
+        speedNum.className = "st-gauge-speed-num up-phase";
         drawOoklaWave(canvas, data.upload_points || [], "upload");
       } else {
+        gaugeCurrentPhase = "download";
         phaseBadge.className = "st-phase-badge down";
         phaseText.innerText = data.phase === "ping" ? "PING / LATENCE" : "DOWNLOAD";
-        speedNum.className = "st-live-speed-num";
+        speedNum.className = "st-gauge-speed-num";
         drawOoklaWave(canvas, data.download_points || [], "download");
       }
     } else if (data.status === "completed") {
       clearInterval(speedtestPollTimer);
       speedtestPollTimer = null;
+      gaugeTargetSpeed = 0;
 
       heroBox.style.display = "flex";
       liveDashboard.style.display = "none";
@@ -646,6 +991,7 @@ async function pollSpeedtestStatus() {
     } else if (data.status === "error") {
       clearInterval(speedtestPollTimer);
       speedtestPollTimer = null;
+      gaugeTargetSpeed = 0;
 
       heroBox.style.display = "flex";
       liveDashboard.style.display = "none";
