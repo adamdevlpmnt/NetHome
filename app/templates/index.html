@@ -14,13 +14,18 @@
   <link rel="icon" type="image/svg+xml" href="/static/icons/icon.svg">
   <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 
+  <!-- Google Fonts : Barlow Semi Condensed & Inter (Ookla Style) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Barlow+Semi+Condensed:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+
   <!-- Chart.js pour les graphiques de consommation -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <!-- Feather Icons pour des icônes ultra-légères et nettes -->
   <script src="https://cdn.jsdelivr.net/npm/feather-icons/dist/feather.min.js"></script>
 
-  <!-- Feuille de styles WiFiman Dark -->
+  <!-- Feuille de styles Ookla Dark -->
   <link rel="stylesheet" href="/static/css/style.css">
 </head>
 <body>
@@ -171,102 +176,147 @@
       </div>
     </section>
 
-    <!-- ONGLET 3 : SPEEDTEST OOKLA (SERVEUR ALGÉRIE TÉLÉCOM) -->
+    <!-- ONGLET 3 : SPEEDTEST OOKLA (RÉPLIQUE CONFORME CAPTURE 2, 3, 4, 5) -->
     <section id="tabSpeedtest" class="tab-content">
-      <!-- Badge Serveur Actif -->
-      <div class="speedtest-server-badge">
-        <i data-feather="server" style="width: 15px; height: 15px; color: var(--color-blue);"></i>
-        <div>
-          <strong id="stServerName">Algérie Télécom - 10G</strong>
-          <span>Alger, Algérie (ID: 68856)</span>
-        </div>
-      </div>
-
-      <!-- Bouton d'action central Speedtest (Style Moderne) -->
+      <!-- État d'attente : Bouton GO Ookla avec anneaux concentriques (Capture 3 & 4) -->
       <div class="speedtest-hero-box" id="speedtestHeroBox">
-        <button class="speedtest-go-btn" id="btnStartSpeedtest">
-          <div class="go-circle-inner">
+        <button class="ookla-go-btn" id="btnStartSpeedtest">
+          <div class="go-ring-outer"></div>
+          <div class="go-circle-core">
             <span class="go-text">GO</span>
-            <span class="go-sub">SPEEDTEST</span>
           </div>
         </button>
-        <div class="speedtest-stage-text" id="speedtestStage">Appuyez sur GO pour tester votre connexion</div>
+
+        <div class="ookla-provider-row hero-provider">
+          <div class="ookla-prov-col">
+            <div class="ookla-avatar-icon"><i data-feather="user"></i></div>
+            <div class="ookla-prov-meta">
+              <strong id="stHeroIsp">IDOOM</strong>
+              <span id="stHeroIp">105.100.82.211</span>
+            </div>
+          </div>
+          <div class="ookla-prov-col align-right">
+            <div class="ookla-avatar-icon"><i data-feather="server"></i></div>
+            <div class="ookla-prov-meta">
+              <strong id="stHeroServer">Algérie Télécom - 10G</strong>
+              <span id="stHeroCity">Algiers</span>
+            </div>
+          </div>
+        </div>
       </div>
 
-      <!-- Tachymètre et Jauge Demi-Cercle (Authentic Ookla App Replica) -->
-      <div class="speedtest-live-dashboard" id="speedtestLiveDashboard" style="display: none;">
-        <!-- Barre d'état haute (Ping, Gigue, Phase) -->
-        <div class="st-live-top-bar">
-          <div class="st-live-ping-box">
-            <span>Ping <strong id="stLivePing">-- ms</strong></span>
-            <span>Jitter <strong id="stLiveJitter">-- ms</strong></span>
+      <!-- Dashboard en Direct & Résultats (Capture 2 & 5 Replica au détail près) -->
+      <div class="ookla-live-dashboard" id="speedtestLiveDashboard" style="display: none;">
+        <!-- Barre supérieure : DOWNLOAD Mbps & UPLOAD Mbps -->
+        <div class="ookla-top-cols">
+          <div class="ookla-top-col active" id="colDownload">
+            <div class="ookla-col-title">
+              <span class="arrow-badge down">↓</span>
+              <span class="col-name">DOWNLOAD</span>
+              <span class="col-unit">Mbps</span>
+            </div>
+            <div class="ookla-col-val" id="topDownSpeedVal">—</div>
+            <div class="ookla-col-line down" id="indDownload"></div>
           </div>
-          <div class="st-phase-badge down" id="stLivePhaseBadge">
-            <i data-feather="arrow-down" id="stPhaseIcon" style="width: 12px; height: 12px;"></i>
-            <span id="stPhaseText">DOWNLOAD</span>
+
+          <div class="ookla-top-col" id="colUpload">
+            <div class="ookla-col-title">
+              <span class="arrow-badge up">↑</span>
+              <span class="col-name">UPLOAD</span>
+              <span class="col-unit">Mbps</span>
+            </div>
+            <div class="ookla-col-val" id="topUpSpeedVal">—</div>
+            <div class="ookla-col-line up" id="indUpload"></div>
           </div>
         </div>
 
-        <!-- Jauge Tachymétrique en Demi-Cercle avec Graduations et Aiguille -->
-        <div class="st-gauge-container">
-          <canvas id="speedtestGaugeCanvas" width="340" height="220"></canvas>
-          <div class="st-gauge-overlay">
-            <div class="st-gauge-speed-num" id="stLiveSpeedNum">0.0</div>
-            <div class="st-gauge-unit">Mbps</div>
+        <!-- Ligne métriques : Ping (⇋), Latence Download (↓), Latence Upload (↑) -->
+        <div class="ookla-metrics-bar">
+          <div class="ookla-ping-title">Ping <span class="ms-unit">ms</span></div>
+          
+          <div class="ookla-metric-item">
+            <span class="metric-circle ping-yellow">⇄</span>
+            <span class="metric-num" id="stLivePingVal">--</span>
+          </div>
+
+          <div class="ookla-metric-item">
+            <span class="metric-circle down-cyan">↓</span>
+            <span class="metric-num" id="stLiveDownLatVal">--</span>
+          </div>
+
+          <div class="ookla-metric-item">
+            <span class="metric-circle up-purple">↑</span>
+            <span class="metric-num" id="stLiveUpLatVal">—</span>
           </div>
         </div>
 
-        <!-- Courbe Spline Animée Ookla sous la jauge -->
-        <div class="st-canvas-wrap">
-          <canvas id="speedtestLiveCanvas" height="85"></canvas>
-        </div>
-
-        <!-- Barre de progression continue -->
-        <div class="st-progress-track">
-          <div class="st-progress-fill" id="stProgressBar"></div>
-        </div>
-        <div class="speedtest-stage-text" id="speedtestLiveStageText">Connexion au serveur...</div>
-      </div>
-
-      <!-- Résultat Détaillé -->
-      <div class="speedtest-result-card" id="speedtestResultCard" style="display: none;">
-        <div class="st-main-speeds">
-          <div class="st-speed-col">
-            <span class="st-label"><i data-feather="arrow-down" style="width: 14px; color: var(--color-cyan);"></i> DOWNLOAD</span>
-            <span class="st-num down" id="stDownloadVal">--</span>
-            <span class="st-unit">Mbps</span>
-            <span class="st-loaded-lat" id="stDownloadLat">Latence: -- ms</span>
+        <!-- 4 Tuiles Applications avec 5 points d'évaluation (Capture 2 & 5) -->
+        <div class="ookla-app-tiles">
+          <div class="app-tile">
+            <div class="tile-icon-box"><i data-feather="layout"></i></div>
+            <div class="tile-dots" id="dotsWeb">
+              <span class="dot active"></span><span class="dot active"></span><span class="dot active"></span><span class="dot active"></span><span class="dot active"></span>
+            </div>
           </div>
-          <div class="st-divider"></div>
-          <div class="st-speed-col">
-            <span class="st-label"><i data-feather="arrow-up" style="width: 14px; color: var(--color-purple);"></i> UPLOAD</span>
-            <span class="st-num up" id="stUploadVal">--</span>
-            <span class="st-unit">Mbps</span>
-            <span class="st-loaded-lat" id="stUploadLat">Latence: -- ms</span>
+          <div class="app-tile">
+            <div class="tile-icon-box"><i data-feather="crosshair"></i></div>
+            <div class="tile-dots" id="dotsGaming">
+              <span class="dot active"></span><span class="dot active"></span><span class="dot active"></span><span class="dot active"></span><span class="dot active"></span>
+            </div>
+          </div>
+          <div class="app-tile">
+            <div class="tile-icon-box"><i data-feather="play-circle"></i></div>
+            <div class="tile-dots" id="dotsVideo">
+              <span class="dot active"></span><span class="dot active"></span><span class="dot active"></span><span class="dot active"></span><span class="dot active"></span>
+            </div>
+          </div>
+          <div class="app-tile">
+            <div class="tile-icon-box"><i data-feather="video"></i></div>
+            <div class="tile-dots" id="dotsCalls">
+              <span class="dot active"></span><span class="dot active"></span><span class="dot active"></span><span class="dot active"></span><span class="dot active"></span>
+            </div>
           </div>
         </div>
 
-        <div class="st-metrics-grid">
-          <div class="st-metric-item">
-            <span class="m-label">Ping</span>
-            <span class="m-val" id="stPingVal">-- ms</span>
-          </div>
-          <div class="st-metric-item">
-            <span class="m-label">Jitter</span>
-            <span class="m-val" id="stJitterVal">-- ms</span>
-          </div>
-          <div class="st-metric-item">
-            <span class="m-label">Perte paquets</span>
-            <span class="m-val" id="stLossVal">0%</span>
+        <!-- Cadran Speedometer Tachymètre épais Ookla (Canvas) -->
+        <div class="ookla-gauge-wrap">
+          <canvas id="speedtestGaugeCanvas" width="360" height="280"></canvas>
+          <div class="ookla-gauge-center">
+            <div class="ookla-digital-speed" id="stLiveSpeedNum">0.00</div>
+            <div class="ookla-digital-unit">
+              <span class="speed-arrow down" id="stUnitArrow">↓</span>
+              <span class="speed-unit-text">Mbps</span>
+            </div>
           </div>
         </div>
 
-        <div class="st-info-footer">
-          <div>
-            <div id="stIspInfo" style="font-size: 0.8rem; font-weight: 500;">Algerie Telecom</div>
-            <div id="stIpInfo" style="font-size: 0.72rem; color: var(--text-dim);">IP: 105.100.4.253</div>
+        <!-- Ligne ISP & Serveur sous la jauge (Capture 2 & 5) -->
+        <div class="ookla-provider-row in-dashboard">
+          <div class="ookla-prov-col">
+            <div class="ookla-avatar-icon"><i data-feather="user"></i></div>
+            <div class="ookla-prov-meta">
+              <strong id="stLiveIspName">IDOOM</strong>
+              <span id="stLiveIpAddr">105.100.82.211</span>
+            </div>
           </div>
-          <a id="stShareLink" href="#" target="_blank" class="btn-secondary" style="font-size: 0.75rem; text-decoration: none; display: flex; align-items: center; gap: 4px;">
+          <div class="ookla-prov-col align-right">
+            <div class="ookla-avatar-icon"><i data-feather="server"></i></div>
+            <div class="ookla-prov-meta">
+              <strong id="stLiveServerName">Algérie Télécom - 10G</strong>
+              <span id="stLiveServerCity">Algiers</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Barre de progression continue Ookla (Bas de page) -->
+        <div class="ookla-progress-track">
+          <div class="ookla-progress-bar down" id="stProgressBar"></div>
+        </div>
+
+        <!-- Bouton Nouveau Test (affiché à la fin) -->
+        <div class="ookla-end-actions" id="stEndActions" style="display: none;">
+          <button class="btn-primary" id="btnRestartTest">Nouveau Test</button>
+          <a id="stShareLink" href="#" target="_blank" class="btn-secondary" style="display: none; align-items: center; gap: 4px; text-decoration: none;">
             <span>Résultat Ookla</span>
             <i data-feather="external-link" style="width: 12px; height: 12px;"></i>
           </a>

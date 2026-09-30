@@ -90,6 +90,10 @@ function initTabs() {
         pageTitle.innerText = "Speedtest Ookla";
         fetchSpeedtestStatus();
         fetchSpeedtestHistory();
+        const canvas = document.getElementById("speedtestGaugeCanvas");
+        if (canvas) {
+          drawOoklaGauge(canvas, gaugeCurrentSpeed, gaugeCurrentPhase);
+        }
       } else if (tabId === "tabBandwidth") {
         pageTitle.innerText = "Bande Passante";
         if (bandwidthChart) bandwidthChart.resize();
@@ -183,61 +187,69 @@ async function probeClientUrl(url, timeoutMs = 3500) {
 }
 
 async function fetchClientLatency() {
-  const clientTargets = [
-    {
-      id: "srv",
-      name: "Serveur Maison (TrueNAS)",
-      host: window.location.hostname || "192.168.1.x",
-      icon: "server",
-      url: "/api/ping"
-    },
-    {
-      id: "cf",
-      name: "Cloudflare (1.1.1.1)",
-      host: "1.1.1.1",
-      icon: "cloudflare",
-      url: "https://1.1.1.1/cdn-cgi/trace"
-    },
-    {
-      id: "goog",
-      name: "Google (Web & CDN)",
-      host: "google.com",
-      icon: "google",
-      url: "https://www.google.com/generate_204"
-    },
-    {
-      id: "ms",
-      name: "Microsoft Services",
-      host: "bing.com",
-      icon: "microsoft",
-      url: "https://www.bing.com/favicon.ico"
+  let userTargets = [];
+  try {
+    const res = await fetch("/api/targets");
+    if (res.ok) {
+      const data = await res.json();
+      userTargets = data.targets || [];
     }
-  ];
-
-  const container = document.getElementById("targetList");
-  if (!container.querySelector(".client-target-card")) {
-    const placeholders = clientTargets.map(t => ({
-      name: t.name,
-      host: t.host,
-      icon: t.icon,
-      display_latency: "Mesure...",
-      status_color: "var(--text-dim)",
-      is_client: true
-    }));
-    renderLatencyTargets(placeholders);
+  } catch (e) {
+    console.error("Erreur récupération cibles utilisateur:", e);
   }
 
-  const results = await Promise.all(clientTargets.map(async t => {
-    const lat = await probeClientUrl(t.url);
+  if (userTargets.length === 0) {
+    renderLatencyTargets([]);
+    return;
+  }
+
+  const container = document.getElementById("targetList");
+  // Afficher immédiatement les cibles de l'utilisateur avec l'indicateur "Mesure..."
+  const placeholders = userTargets.map(t => ({
+    name: t.name,
+    host: t.host,
+    icon: t.icon,
+    display_latency: "Mesure...",
+    status_color: "var(--text-dim)",
+    is_client: true
+  }));
+  renderLatencyTargets(placeholders);
+
+  // Sonder chaque cible utilisateur en parallèle depuis ce terminal (smartphone/PC)
+  const results = await Promise.all(userTargets.map(async t => {
+    let lat = null;
+    const rawHost = (t.host || "").trim();
+    const isLocal = t.is_gateway || rawHost === "auto" || rawHost === window.location.hostname || rawHost === "127.0.0.1" || rawHost === "localhost";
+    
+    if (isLocal) {
+      // Mesure aller-retour direct du smartphone vers le serveur HomeNetwork/NAS
+      lat = await probeClientUrl("/api/ping");
+    } else {
+      const isExplicitHttp = rawHost.toLowerCase().startsWith("http://");
+      const cleanHost = rawHost.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").trim();
+      if (cleanHost) {
+        if (isExplicitHttp && window.location.protocol === "http:") {
+          lat = await probeClientUrl(`http://${cleanHost}`);
+          if (lat === null) lat = await probeClientUrl(`https://${cleanHost}`);
+        } else {
+          lat = await probeClientUrl(`https://${cleanHost}`);
+          if (lat === null && window.location.protocol === "http:") {
+            lat = await probeClientUrl(`http://${cleanHost}`);
+          }
+        }
+      }
+    }
+
     let color = "#ef4444";
-    let display = "Échec";
+    let display = "N/A";
     if (lat !== null) {
       display = `${lat} ms`;
       if (lat < 40) color = "#10b981";
-      else if (lat < 90) color = "#38bdf8";
+      else if (lat < 90) color = "#00d2ff";
       else if (lat < 160) color = "#f59e0b";
       else color = "#ef4444";
     }
+
     return {
       name: t.name,
       host: t.host,
@@ -619,31 +631,34 @@ function escapeHtml(text) {
 }
 
 // --- 5. Speedtest Ookla (Serveur Algérie Télécom - ID 68856) ---
+// --- 5. Speedtest Ookla (Authentic Capture 2 & 5 Replica Engine) ---
 let speedtestPollTimer = null;
 let gaugeAnimFrame = null;
 let gaugeCurrentSpeed = 0;
 let gaugeTargetSpeed = 0;
 let gaugeCurrentPhase = "download";
+let finalDownloadSpeed = 0;
 
-const SPEED_SCALE = [0, 1, 5, 10, 25, 50, 100, 250, 500, 1000];
+// Échelle exacte Ookla (Capture 2 & 5) : 8 segments de 30° = 240°
+// 0 (150°), 5 (180°), 10 (210°), 50 (240°), 100 (270° sommet), 250 (300°), 500 (330°), 750 (360°), 1000 (390°)
+const OOKLA_SCALE_POINTS = [0, 5, 10, 50, 100, 250, 500, 750, 1000];
+const OOKLA_START_ANGLE = (150 * Math.PI) / 180;
+const OOKLA_END_ANGLE = (390 * Math.PI) / 180;
+const OOKLA_SEG_ANGLE = (30 * Math.PI) / 180;
 
 function speedToAngle(mbps) {
-  // Semi-circle speedometer: 135 deg (0.75 PI) à 405 deg (2.25 PI) -> 270 deg
-  const startAngle = 0.75 * Math.PI;
-  const endAngle = 2.25 * Math.PI;
-  const totalAngle = endAngle - startAngle;
+  if (mbps <= 0) return OOKLA_START_ANGLE;
+  if (mbps >= 1000) return OOKLA_END_ANGLE;
 
-  if (mbps <= 0) return startAngle;
-  if (mbps >= 1000) return endAngle;
-
-  for (let i = 0; i < SPEED_SCALE.length - 1; i++) {
-    if (mbps >= SPEED_SCALE[i] && mbps <= SPEED_SCALE[i + 1]) {
-      const segFraction = (mbps - SPEED_SCALE[i]) / (SPEED_SCALE[i + 1] - SPEED_SCALE[i]);
-      const segAngle = totalAngle / (SPEED_SCALE.length - 1);
-      return startAngle + (i + segFraction) * segAngle;
+  for (let i = 0; i < OOKLA_SCALE_POINTS.length - 1; i++) {
+    const v0 = OOKLA_SCALE_POINTS[i];
+    const v1 = OOKLA_SCALE_POINTS[i + 1];
+    if (mbps >= v0 && mbps <= v1) {
+      const frac = (mbps - v0) / (v1 - v0);
+      return OOKLA_START_ANGLE + (i + frac) * OOKLA_SEG_ANGLE;
     }
   }
-  return endAngle;
+  return OOKLA_END_ANGLE;
 }
 
 function initGaugeAnimation() {
@@ -651,8 +666,8 @@ function initGaugeAnimation() {
 
   function renderLoop() {
     const diff = gaugeTargetSpeed - gaugeCurrentSpeed;
-    if (Math.abs(diff) > 0.05) {
-      gaugeCurrentSpeed += diff * 0.14;
+    if (Math.abs(diff) > 0.02) {
+      gaugeCurrentSpeed += diff * 0.14; // inertie douce Ookla
     } else {
       gaugeCurrentSpeed = gaugeTargetSpeed;
     }
@@ -667,134 +682,134 @@ function initGaugeAnimation() {
 }
 
 function drawOoklaGauge(canvas, speed, phase) {
+  if (!canvas) return;
   const ctx = canvas.getContext("2d");
-  const width = canvas.width;
-  const height = canvas.height;
+  const width = canvas.width = 360;
+  const height = canvas.height = 280;
   ctx.clearRect(0, 0, width, height);
 
-  const cx = width / 2;
-  const cy = height - 52;
-  const radius = 118;
-  const startAngle = 0.75 * Math.PI;
-  const endAngle = 2.25 * Math.PI;
-  const totalAngle = endAngle - startAngle;
-
+  const cx = width / 2; // 180
+  const cy = 195;
+  const outerR = 135;
+  const innerR = 108; // 27px d'épaisseur exacte
   const isUp = phase === "upload";
-  const mainColor = isUp ? "#a855f7" : "#00f0ff";
-  const glowColor = isUp ? "rgba(168, 85, 247, 0.45)" : "rgba(0, 240, 255, 0.45)";
 
-  // 1. Arc de fond subtil
+  // 1. Arc de fond sombre Ookla (Capture 2 & 5)
   ctx.save();
   ctx.beginPath();
-  ctx.arc(cx, cy, radius, startAngle, endAngle);
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
-  ctx.lineWidth = 5;
-  ctx.lineCap = "round";
-  ctx.stroke();
+  ctx.arc(cx, cy, outerR, OOKLA_START_ANGLE, OOKLA_END_ANGLE, false);
+  ctx.arc(cx, cy, innerR, OOKLA_END_ANGLE, OOKLA_START_ANGLE, true);
+  ctx.closePath();
+  ctx.fillStyle = "#181d28";
+  ctx.fill();
   ctx.restore();
 
-  // 2. Graduations & Labels de vitesse (0, 1, 5, 10, 25, 50, 100, 250, 500, 1k)
-  const numSteps = SPEED_SCALE.length;
-  for (let i = 0; i < numSteps; i++) {
-    const angle = startAngle + (i / (numSteps - 1)) * totalAngle;
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-
-    // Graduation principale
-    const tickInner = radius - 8;
-    const tickOuter = radius + 2;
-    ctx.beginPath();
-    ctx.moveTo(cx + cos * tickInner, cy + sin * tickInner);
-    ctx.lineTo(cx + cos * tickOuter, cy + sin * tickOuter);
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.38)";
-    ctx.lineWidth = 1.8;
-    ctx.stroke();
-
-    // Étiquette numérique
-    const labelRadius = radius - 20;
-    const lx = cx + cos * labelRadius;
-    const ly = cy + sin * labelRadius;
-    const text = SPEED_SCALE[i] >= 1000 ? "1k" : SPEED_SCALE[i].toString();
-
-    ctx.save();
-    ctx.font = "600 10px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-    ctx.fillStyle = "#64748b";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText(text, lx, ly);
-    ctx.restore();
-
-    // Sous-graduations
-    if (i < numSteps - 1) {
-      const nextAngle = startAngle + ((i + 1) / (numSteps - 1)) * totalAngle;
-      const midAngle = (angle + nextAngle) / 2;
-      const mcos = Math.cos(midAngle);
-      const msin = Math.sin(midAngle);
-      ctx.beginPath();
-      ctx.moveTo(cx + mcos * (radius - 5), cy + msin * (radius - 5));
-      ctx.lineTo(cx + mcos * (radius + 1), cy + msin * (radius + 1));
-      ctx.strokeStyle = "rgba(255, 255, 255, 0.15)";
-      ctx.lineWidth = 1;
-      ctx.stroke();
-    }
-  }
-
-  // 3. Arc Actif Lumineux
+  // 2. Arc Actif Coloré avec Dégradé Conforme
   const currentAngle = speedToAngle(speed);
-  if (currentAngle > startAngle) {
+  if (currentAngle > OOKLA_START_ANGLE) {
     ctx.save();
-    ctx.shadowColor = mainColor;
-    ctx.shadowBlur = 14;
+    let grad;
+    if (isUp) {
+      // Dégradé Violet vers Magenta (Capture 5)
+      grad = ctx.createLinearGradient(cx - outerR, cy + outerR, cx + outerR, cy - outerR);
+      grad.addColorStop(0.0, "#8b3aed");
+      grad.addColorStop(0.5, "#b5179e");
+      grad.addColorStop(1.0, "#f72585");
+      ctx.shadowColor = "rgba(247, 37, 133, 0.45)";
+      ctx.shadowBlur = 18;
+    } else {
+      // Dégradé Cyan vers Vert Menthe (Capture 2)
+      grad = ctx.createLinearGradient(cx - outerR, cy + outerR, cx + outerR, cy - outerR);
+      grad.addColorStop(0.0, "#00d2ff");
+      grad.addColorStop(0.4, "#00e5ff");
+      grad.addColorStop(1.0, "#48e596");
+      ctx.shadowColor = "rgba(0, 210, 255, 0.45)";
+      ctx.shadowBlur = 18;
+    }
+
     ctx.beginPath();
-    ctx.arc(cx, cy, radius, startAngle, currentAngle);
-    ctx.strokeStyle = mainColor;
-    ctx.lineWidth = 5.5;
-    ctx.lineCap = "round";
-    ctx.stroke();
+    ctx.arc(cx, cy, outerR, OOKLA_START_ANGLE, currentAngle, false);
+    ctx.arc(cx, cy, innerR, currentAngle, OOKLA_START_ANGLE, true);
+    ctx.closePath();
+    ctx.fillStyle = grad;
+    ctx.fill();
     ctx.restore();
   }
 
-  // 4. Aiguille Tachymétrique Ookla
-  const needleAngle = currentAngle;
-  const needleLen = radius - 14;
-  const needleBase = 5;
+  // 3. Graduations & Chiffres de Vitesse (Capture 2 & 5 : 0, 5, 10, 50, 100, 250, 500, 750, 1000)
+  ctx.save();
+  ctx.font = "700 13px 'Inter', -apple-system, sans-serif";
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
 
+  for (let i = 0; i < OOKLA_SCALE_POINTS.length; i++) {
+    const val = OOKLA_SCALE_POINTS[i];
+    const angle = OOKLA_START_ANGLE + i * OOKLA_SEG_ANGLE;
+    const textRadius = innerR - 16;
+    const tx = cx + Math.cos(angle) * textRadius;
+    const ty = cy + Math.sin(angle) * textRadius;
+
+    // Les chiffres dépassés sont blanc vif, ceux devant l'aiguille sont gris feutré (Capture 2)
+    ctx.fillStyle = val <= speed ? "#ffffff" : "#64748b";
+    ctx.fillText(val.toString(), tx, ty);
+  }
+  ctx.restore();
+
+  // 4. Aiguille Trapézoïdale Fumé / Métallique (Capture 2 & 5)
   ctx.save();
   ctx.translate(cx, cy);
-  ctx.rotate(needleAngle);
+  ctx.rotate(currentAngle);
 
-  ctx.shadowColor = glowColor;
-  ctx.shadowBlur = 10;
-
-  ctx.beginPath();
-  ctx.moveTo(0, -needleBase);
-  ctx.lineTo(needleLen, 0);
-  ctx.lineTo(0, needleBase);
-  ctx.lineTo(-12, 0);
-  ctx.closePath();
+  const needleLen = innerR - 6;
+  const baseW = 10;
+  const tipW = 24;
 
   const needleGrad = ctx.createLinearGradient(0, 0, needleLen, 0);
-  needleGrad.addColorStop(0, "#ffffff");
-  needleGrad.addColorStop(1, mainColor);
+  needleGrad.addColorStop(0.0, "rgba(18, 22, 30, 0.95)");
+  needleGrad.addColorStop(0.4, "rgba(70, 80, 100, 0.85)");
+  needleGrad.addColorStop(1.0, "rgba(165, 180, 205, 0.85)");
+
+  ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
+  ctx.shadowBlur = 12;
+
+  ctx.beginPath();
+  ctx.moveTo(0, -baseW / 2);
+  ctx.lineTo(needleLen, -tipW / 2);
+  ctx.lineTo(needleLen, tipW / 2);
+  ctx.lineTo(0, baseW / 2);
+  ctx.closePath();
   ctx.fillStyle = needleGrad;
   ctx.fill();
 
   // Pivot central
   ctx.beginPath();
-  ctx.arc(0, 0, 9, 0, Math.PI * 2);
-  ctx.fillStyle = "#1e293b";
+  ctx.arc(0, 0, 8, 0, Math.PI * 2);
+  ctx.fillStyle = "#12151d";
   ctx.fill();
-  ctx.strokeStyle = mainColor;
-  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#252d3d";
+  ctx.lineWidth = 1.5;
   ctx.stroke();
 
-  // Point blanc au centre
-  ctx.beginPath();
-  ctx.arc(0, 0, 3.5, 0, Math.PI * 2);
-  ctx.fillStyle = "#ffffff";
-  ctx.fill();
-
   ctx.restore();
+}
+
+function updateAppQualityDots(ping) {
+  const p = (ping != null && ping > 0) ? ping : 20;
+  let count = 5;
+  if (p > 180) count = 1;
+  else if (p > 90) count = 2;
+  else if (p > 45) count = 3;
+  else if (p > 20) count = 4;
+
+  ["dotsWeb", "dotsGaming", "dotsVideo", "dotsCalls"].forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    const dots = el.querySelectorAll(".dot");
+    dots.forEach((d, idx) => {
+      if (idx < count) d.classList.add("active");
+      else d.classList.remove("active");
+    });
+  });
 }
 
 function initSpeedtest() {
@@ -805,112 +820,44 @@ function initSpeedtest() {
       startSpeedtestAction();
     });
   }
-}
 
-function drawOoklaWave(canvas, points, phase) {
-  if (!canvas || !canvas.parentElement) return;
-  const ctx = canvas.getContext("2d");
-  const width = canvas.width = canvas.parentElement.clientWidth;
-  const height = canvas.height = canvas.parentElement.clientHeight || 85;
-
-  ctx.clearRect(0, 0, width, height);
-
-  // Lignes de grille horizontales subtiles
-  ctx.strokeStyle = "rgba(255, 255, 255, 0.05)";
-  ctx.lineWidth = 1;
-  for (let y = 20; y < height; y += 25) {
-    ctx.beginPath();
-    ctx.moveTo(0, y);
-    ctx.lineTo(width, y);
-    ctx.stroke();
+  const btnRestart = document.getElementById("btnRestartTest");
+  if (btnRestart) {
+    btnRestart.addEventListener("click", () => {
+      startSpeedtestAction();
+    });
   }
-
-  if (!points || points.length === 0) return;
-
-  const maxVal = Math.max(25, ...points) * 1.15;
-  const isUp = phase === "upload";
-  const strokeColor = isUp ? "#a855f7" : "#00f0ff";
-  const glowColor = isUp ? "rgba(168, 85, 247, 0.45)" : "rgba(0, 240, 255, 0.45)";
-
-  const coords = points.map((p, i) => {
-    const x = (i / Math.max(1, points.length - 1)) * width;
-    const y = height - (p / maxVal) * (height - 18) - 6;
-    return { x, y };
-  });
-
-  if (coords.length === 1) {
-    coords.push({ x: width, y: coords[0].y });
-  }
-
-  const grad = ctx.createLinearGradient(0, 0, 0, height);
-  grad.addColorStop(0, glowColor);
-  grad.addColorStop(1, "rgba(10, 13, 20, 0.0)");
-
-  ctx.beginPath();
-  ctx.moveTo(coords[0].x, height);
-  ctx.lineTo(coords[0].x, coords[0].y);
-
-  for (let i = 0; i < coords.length - 1; i++) {
-    const p0 = coords[i];
-    const p1 = coords[i + 1];
-    const midX = (p0.x + p1.x) / 2;
-    ctx.quadraticCurveTo(p0.x, p0.y, midX, (p0.y + p1.y) / 2);
-  }
-  ctx.lineTo(coords[coords.length - 1].x, coords[coords.length - 1].y);
-  ctx.lineTo(width, height);
-  ctx.closePath();
-  ctx.fillStyle = grad;
-  ctx.fill();
-
-  ctx.save();
-  ctx.shadowColor = strokeColor;
-  ctx.shadowBlur = 12;
-  ctx.strokeStyle = strokeColor;
-  ctx.lineWidth = 3;
-  ctx.beginPath();
-  ctx.moveTo(coords[0].x, coords[0].y);
-  for (let i = 0; i < coords.length - 1; i++) {
-    const p0 = coords[i];
-    const p1 = coords[i + 1];
-    const midX = (p0.x + p1.x) / 2;
-    ctx.quadraticCurveTo(p0.x, p0.y, midX, (p0.y + p1.y) / 2);
-  }
-  ctx.lineTo(coords[coords.length - 1].x, coords[coords.length - 1].y);
-  ctx.stroke();
-  ctx.restore();
-
-  const last = coords[coords.length - 1];
-  ctx.save();
-  ctx.shadowColor = strokeColor;
-  ctx.shadowBlur = 14;
-  ctx.beginPath();
-  ctx.arc(last.x, last.y, 4, 0, Math.PI * 2);
-  ctx.fillStyle = "#ffffff";
-  ctx.fill();
-  ctx.restore();
 }
 
 async function startSpeedtestAction() {
   const heroBox = document.getElementById("speedtestHeroBox");
   const liveDashboard = document.getElementById("speedtestLiveDashboard");
-  const resultCard = document.getElementById("speedtestResultCard");
+  const endActions = document.getElementById("stEndActions");
   const speedNum = document.getElementById("stLiveSpeedNum");
   const progressBar = document.getElementById("stProgressBar");
-  const canvas = document.getElementById("speedtestLiveCanvas");
+  const topDownVal = document.getElementById("topDownSpeedVal");
+  const topUpVal = document.getElementById("topUpSpeedVal");
+  const colDown = document.getElementById("colDownload");
+  const colUp = document.getElementById("colUpload");
 
-  heroBox.style.display = "none";
-  liveDashboard.style.display = "block";
-  resultCard.style.display = "none";
+  if (heroBox) heroBox.style.display = "none";
+  if (liveDashboard) liveDashboard.style.display = "block";
+  if (endActions) endActions.style.display = "none";
 
-  speedNum.innerText = "0.0";
+  if (speedNum) speedNum.innerText = "0.00";
+  if (topDownVal) topDownVal.innerText = "0.00";
+  if (topUpVal) topUpVal.innerText = "—";
+  if (colDown) colDown.classList.add("active");
+  if (colUp) colUp.classList.remove("active");
+
   gaugeCurrentSpeed = 0;
   gaugeTargetSpeed = 0;
   gaugeCurrentPhase = "download";
-  progressBar.style.width = "0%";
+  finalDownloadSpeed = 0;
 
-  if (canvas) {
-    const ctx = canvas.getContext("2d");
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
+  if (progressBar) {
+    progressBar.className = "ookla-progress-bar down";
+    progressBar.style.width = "0%";
   }
 
   try {
@@ -920,12 +867,12 @@ async function startSpeedtestAction() {
       body: JSON.stringify({ server_id: 68856 })
     });
     const data = await res.json();
-    
+
     if (speedtestPollTimer) clearInterval(speedtestPollTimer);
-    speedtestPollTimer = setInterval(pollSpeedtestStatus, 180);
+    speedtestPollTimer = setInterval(pollSpeedtestStatus, 150);
   } catch (err) {
-    heroBox.style.display = "flex";
-    liveDashboard.style.display = "none";
+    if (heroBox) heroBox.style.display = "flex";
+    if (liveDashboard) liveDashboard.style.display = "none";
     alert("Erreur de communication avec le serveur.");
   }
 }
@@ -933,15 +880,18 @@ async function startSpeedtestAction() {
 async function pollSpeedtestStatus() {
   const heroBox = document.getElementById("speedtestHeroBox");
   const liveDashboard = document.getElementById("speedtestLiveDashboard");
-  const resultCard = document.getElementById("speedtestResultCard");
+  const endActions = document.getElementById("stEndActions");
   const speedNum = document.getElementById("stLiveSpeedNum");
-  const phaseBadge = document.getElementById("stLivePhaseBadge");
-  const phaseText = document.getElementById("stPhaseText");
-  const stageText = document.getElementById("speedtestLiveStageText");
+  const topDownVal = document.getElementById("topDownSpeedVal");
+  const topUpVal = document.getElementById("topUpSpeedVal");
+  const colDown = document.getElementById("colDownload");
+  const colUp = document.getElementById("colUpload");
+  const unitArrow = document.getElementById("stUnitArrow");
   const progressBar = document.getElementById("stProgressBar");
-  const livePing = document.getElementById("stLivePing");
-  const liveJitter = document.getElementById("stLiveJitter");
-  const canvas = document.getElementById("speedtestLiveCanvas");
+
+  const pingVal = document.getElementById("stLivePingVal");
+  const downLatVal = document.getElementById("stLiveDownLatVal");
+  const upLatVal = document.getElementById("stLiveUpLatVal");
 
   try {
     const res = await fetch("/api/speedtest/status");
@@ -949,52 +899,72 @@ async function pollSpeedtestStatus() {
     const data = await res.json();
 
     if (data.status === "running") {
-      heroBox.style.display = "none";
-      liveDashboard.style.display = "block";
-      resultCard.style.display = "none";
+      if (heroBox) heroBox.style.display = "none";
+      if (liveDashboard) liveDashboard.style.display = "block";
+      if (endActions) endActions.style.display = "none";
 
       const speed = data.current_speed_mbps || 0;
-      speedNum.innerText = speed.toFixed(1);
       gaugeTargetSpeed = speed;
 
-      if (data.current_ping != null) livePing.innerText = `${data.current_ping} ms`;
-      if (data.current_jitter != null) liveJitter.innerText = `${data.current_jitter} ms`;
-      if (data.progress != null) progressBar.style.width = `${Math.min(100, Math.round(data.progress * 100))}%`;
-      stageText.innerText = data.stage || "Mesure en cours...";
+      if (speedNum) speedNum.innerText = speed.toFixed(2);
 
       if (data.phase === "upload") {
         gaugeCurrentPhase = "upload";
-        phaseBadge.className = "st-phase-badge up";
-        phaseText.innerText = "UPLOAD";
-        speedNum.className = "st-gauge-speed-num up-phase";
-        drawOoklaWave(canvas, data.upload_points || [], "upload");
+        if (colUp) colUp.classList.add("active");
+        if (colDown) colDown.classList.remove("active");
+        if (topUpVal) topUpVal.innerText = speed.toFixed(2);
+        if (topDownVal && data.latest_result?.download_mbps != null) {
+          topDownVal.innerText = data.latest_result.download_mbps.toFixed(2);
+        }
+        if (unitArrow) {
+          unitArrow.className = "speed-arrow up";
+          unitArrow.innerText = "↑";
+        }
+        if (progressBar) progressBar.className = "ookla-progress-bar up";
       } else {
         gaugeCurrentPhase = "download";
-        phaseBadge.className = "st-phase-badge down";
-        phaseText.innerText = data.phase === "ping" ? "PING / LATENCE" : "DOWNLOAD";
-        speedNum.className = "st-gauge-speed-num";
-        drawOoklaWave(canvas, data.download_points || [], "download");
+        finalDownloadSpeed = speed;
+        if (colDown) colDown.classList.add("active");
+        if (colUp) colUp.classList.remove("active");
+        if (topDownVal) topDownVal.innerText = speed.toFixed(2);
+        if (topUpVal) topUpVal.innerText = "—";
+        if (unitArrow) {
+          unitArrow.className = "speed-arrow down";
+          unitArrow.innerText = "↓";
+        }
+        if (progressBar) progressBar.className = "ookla-progress-bar down";
+      }
+
+      if (data.current_ping != null && pingVal) {
+        pingVal.innerText = data.current_ping;
+        updateAppQualityDots(data.current_ping);
+      }
+      if (data.latest_result?.download_latency_ms != null && downLatVal) {
+        downLatVal.innerText = data.latest_result.download_latency_ms;
+      }
+      if (data.latest_result?.upload_latency_ms != null && upLatVal) {
+        upLatVal.innerText = data.latest_result.upload_latency_ms;
+      }
+
+      if (progressBar && data.progress != null) {
+        progressBar.style.width = `${Math.min(100, Math.round(data.progress * 100))}%`;
       }
     } else if (data.status === "completed") {
       clearInterval(speedtestPollTimer);
       speedtestPollTimer = null;
       gaugeTargetSpeed = 0;
 
-      heroBox.style.display = "flex";
-      liveDashboard.style.display = "none";
-      resultCard.style.display = "block";
-
       if (data.latest_result) {
         renderSpeedtestResult(data.latest_result);
       }
+      if (endActions) endActions.style.display = "flex";
       fetchSpeedtestHistory();
     } else if (data.status === "error") {
       clearInterval(speedtestPollTimer);
       speedtestPollTimer = null;
       gaugeTargetSpeed = 0;
-
-      heroBox.style.display = "flex";
-      liveDashboard.style.display = "none";
+      if (heroBox) heroBox.style.display = "flex";
+      if (liveDashboard) liveDashboard.style.display = "none";
       alert(data.error_message || "Échec du test de débit.");
     }
   } catch (err) {
@@ -1009,7 +979,7 @@ async function fetchSpeedtestStatus() {
     const data = await res.json();
 
     if (data.status === "running") {
-      if (!speedtestPollTimer) speedtestPollTimer = setInterval(pollSpeedtestStatus, 180);
+      if (!speedtestPollTimer) speedtestPollTimer = setInterval(pollSpeedtestStatus, 150);
     } else if (data.latest_result) {
       renderSpeedtestResult(data.latest_result);
     }
@@ -1017,29 +987,46 @@ async function fetchSpeedtestStatus() {
 }
 
 function renderSpeedtestResult(r) {
-  const card = document.getElementById("speedtestResultCard");
-  if (!card || !r) return;
+  if (!r) return;
+  const topDownVal = document.getElementById("topDownSpeedVal");
+  const topUpVal = document.getElementById("topUpSpeedVal");
+  const pingVal = document.getElementById("stLivePingVal");
+  const downLatVal = document.getElementById("stLiveDownLatVal");
+  const upLatVal = document.getElementById("stLiveUpLatVal");
 
-  card.style.display = "block";
-  document.getElementById("stDownloadVal").innerText = r.download_mbps != null ? r.download_mbps : "--";
-  document.getElementById("stUploadVal").innerText = r.upload_mbps != null ? r.upload_mbps : "--";
-  
-  document.getElementById("stDownloadLat").innerText = r.download_latency_ms ? `Latence: ${r.download_latency_ms} ms` : "Latence: --";
-  document.getElementById("stUploadLat").innerText = r.upload_latency_ms ? `Latence: ${r.upload_latency_ms} ms` : "Latence: --";
+  if (topDownVal && r.download_mbps != null) topDownVal.innerText = r.download_mbps.toFixed(2);
+  if (topUpVal && r.upload_mbps != null) topUpVal.innerText = r.upload_mbps.toFixed(2);
+  if (pingVal && r.ping_ms != null) {
+    pingVal.innerText = r.ping_ms;
+    updateAppQualityDots(r.ping_ms);
+  }
+  if (downLatVal && r.download_latency_ms != null) downLatVal.innerText = r.download_latency_ms;
+  if (upLatVal && r.upload_latency_ms != null) upLatVal.innerText = r.upload_latency_ms;
 
-  document.getElementById("stPingVal").innerText = r.ping_ms != null ? `${r.ping_ms} ms` : "--";
-  document.getElementById("stJitterVal").innerText = r.jitter_ms != null ? `${r.jitter_ms} ms` : "--";
-  document.getElementById("stLossVal").innerText = `${r.packet_loss || 0}%`;
+  const ispName = document.getElementById("stLiveIspName");
+  const ipAddr = document.getElementById("stLiveIpAddr");
+  const srvName = document.getElementById("stLiveServerName");
+  const srvCity = document.getElementById("stLiveServerCity");
 
-  document.getElementById("stIspInfo").innerText = r.isp || "Algerie Telecom";
-  document.getElementById("stIpInfo").innerText = r.external_ip ? `IP: ${r.external_ip}` : "";
+  if (ispName && r.isp) ispName.innerText = r.isp;
+  if (ipAddr && r.external_ip) ipAddr.innerText = r.external_ip;
+  if (srvName && r.server_name) srvName.innerText = r.server_name;
+  if (srvCity && r.server_location) srvCity.innerText = r.server_location;
 
-  const link = document.getElementById("stShareLink");
-  if (r.result_url) {
-    link.href = r.result_url;
-    link.style.display = "flex";
-  } else {
-    link.style.display = "none";
+  const heroIsp = document.getElementById("stHeroIsp");
+  const heroIp = document.getElementById("stHeroIp");
+  const heroServer = document.getElementById("stHeroServer");
+  const heroCity = document.getElementById("stHeroCity");
+
+  if (heroIsp && r.isp) heroIsp.innerText = r.isp;
+  if (heroIp && r.external_ip) heroIp.innerText = r.external_ip;
+  if (heroServer && r.server_name) heroServer.innerText = r.server_name;
+  if (heroCity && r.server_location) heroCity.innerText = r.server_location;
+
+  const shareLink = document.getElementById("stShareLink");
+  if (shareLink && r.result_url) {
+    shareLink.href = r.result_url;
+    shareLink.style.display = "flex";
   }
   feather.replace();
 }
