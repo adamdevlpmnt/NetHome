@@ -268,3 +268,19 @@ async def ping_all_targets(targets: List[Dict[str, Any]]) -> List[Dict[str, Any]
     tasks = [_ping_with_sem(t) for t in targets]
     results = await asyncio.gather(*tasks, return_exceptions=False)
     return results
+
+_LATENCY_CACHE: List[Dict[str, Any]] = []
+_LATENCY_CACHE_TIME: float = 0.0
+
+async def get_cached_or_fresh_latency(max_age: float = 1.0) -> List[Dict[str, Any]]:
+    global _LATENCY_CACHE, _LATENCY_CACHE_TIME
+    now = time.time()
+    if _LATENCY_CACHE and (now - _LATENCY_CACHE_TIME < max_age):
+        return _LATENCY_CACHE
+
+    from app.database import get_targets
+    targets = get_targets(active_only=True)
+    results = await ping_all_targets(targets)
+    _LATENCY_CACHE = results
+    _LATENCY_CACHE_TIME = time.time()
+    return results

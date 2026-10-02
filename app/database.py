@@ -313,6 +313,19 @@ def get_latest_speedtest_result() -> Optional[Dict[str, Any]]:
         conn.close()
         return None
 
+def get_best_speedtest_record() -> Optional[Dict[str, Any]]:
+    init_db()
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute("SELECT * FROM speedtest_history ORDER BY download_mbps DESC LIMIT 1")
+        row = cursor.fetchone()
+        conn.close()
+        return dict(row) if row else None
+    except Exception:
+        conn.close()
+        return None
+
 # Initialisation automatique au chargement
 init_db()
 

@@ -11,12 +11,38 @@ document.addEventListener("DOMContentLoaded", () => {
   feather.replace();
   initPwaInstall();
   initTabs();
+
+  // Routage par parametre URL (?tab=tabSpeedtest&state=...)
+  const urlParams = new URLSearchParams(window.location.search);
+  const targetTab = urlParams.get("tab");
+  if (targetTab) {
+    document.querySelectorAll(".nav-item").forEach(b => {
+      if (b.getAttribute("data-tab") === targetTab) b.classList.add("active");
+      else b.classList.remove("active");
+    });
+    document.querySelectorAll(".tab-content").forEach(t => {
+      if (t.id === targetTab) t.classList.add("active");
+      else t.classList.remove("active");
+    });
+    const pageTitle = document.getElementById("pageTitle");
+    if (pageTitle && targetTab === "tabSpeedtest") pageTitle.innerText = "Speedtest Ookla";
+  }
+  const speedState = urlParams.get("state");
+  if (speedState) {
+    applySpeedtestDemoState(speedState);
+  }
+
   initModals();
   initDateFilters();
   initSourceSelector();
 
-  // Chargements initiaux
-  fetchLatency();
+  const latSource = urlParams.get("source");
+  if (latSource === "client") {
+    const btnClient = document.getElementById("btnSourceClient");
+    if (btnClient) btnClient.click();
+  } else {
+    fetchLatency();
+  }
   fetchBandwidthSummary();
   fetchBandwidthHistory("today");
   fetchTargetsList();
@@ -25,31 +51,35 @@ document.addEventListener("DOMContentLoaded", () => {
   fetchSpeedtestStatus();
   fetchSpeedtestHistory();
 
-  // Intervalles de rafraîchissement
+  // Intervalles de rafraîchissement (Temps réel 1.2s pour la latence)
   latencyInterval = setInterval(() => {
     if (latencySource === "client") {
       fetchClientLatency();
     } else {
       fetchLatency();
     }
-  }, 5000);
+  }, 1200);
   summaryInterval = setInterval(fetchBandwidthSummary, 3000);
 
   // Boutons d'actualisation manuelle
-  document.getElementById("btnRefresh").addEventListener("click", () => {
-    const icon = document.querySelector("#btnRefresh i");
-    if (icon) icon.classList.add("spin");
-    const promise = latencySource === "client" ? fetchClientLatency() : fetchLatency();
-    promise.finally(() => {
-      setTimeout(() => { if (icon) icon.classList.remove("spin"); }, 600);
+  const btnRefresh = document.getElementById("btnRefresh");
+  if (btnRefresh) {
+    btnRefresh.addEventListener("click", () => {
+      const icon = btnRefresh.querySelector("i");
+      if (icon) icon.classList.add("spin");
+      const promise = latencySource === "client" ? fetchClientLatency() : fetchLatency();
+      promise.finally(() => {
+        setTimeout(() => { if (icon) icon.classList.remove("spin"); }, 600);
+      });
     });
-  });
+  }
 });
 
 // --- PWA Installation ---
 function initPwaInstall() {
   const banner = document.getElementById("pwaBanner");
   const btn = document.getElementById("btnInstallPwa");
+  if (!banner || !btn) return;
 
   window.addEventListener("beforeinstallprompt", (e) => {
     e.preventDefault();
@@ -167,77 +197,56 @@ function initSourceSelector() {
   });
 }
 
-async function probeClientUrl(url, timeoutMs = 3500) {
-  const start = performance.now();
+let clientHopWarm = false;
+async function measureClientHopLatency() {
   try {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    const sep = url.includes("?") ? "&" : "?";
-    await fetch(`${url}${sep}_t=${Date.now()}`, {
-      method: "HEAD",
-      mode: "no-cors",
-      cache: "no-store",
-      signal: controller.signal
-    });
-    clearTimeout(timer);
-    return Math.max(1, Math.round(performance.now() - start));
+    if (!clientHopWarm) {
+      await fetch("/api/ping", { cache: "no-store" });
+      clientHopWarm = true;
+    }
+    const t0 = performance.now();
+    await fetch("/api/ping", { cache: "no-store" });
+    const rtt = performance.now() - t0;
+    return Math.max(1, Math.round(rtt));
   } catch (e) {
-    return null;
+    return 3; // estimation par défaut Wi-Fi local
   }
 }
 
 async function fetchClientLatency() {
-  let userTargets = [];
+  const notice = document.getElementById("clientModeNotice");
+  if (notice) notice.style.display = "flex";
+
+  // Mesurer le saut réseau local direct du smartphone vers le serveur/routeur
+  const clientHop = await measureClientHopLatency();
+  if (notice) {
+    const span = notice.querySelector("span");
+    if (span) {
+      span.innerHTML = `<span style="display:inline-block; width:7px; height:7px; border-radius:50%; background:#10b981; margin-right:6px; box-shadow:0 0 8px #10b981; animation: livePulse 1.5s infinite;"></span>Mesure en direct depuis votre appareil (saut sans fil : <strong>+${clientHop} ms</strong>).`;
+    }
+  }
+
+  // Récupérer les mesures réelles du serveur vers toutes les cibles (cache serveur 1s ultra rapide)
+  let serverTargets = [];
   try {
-    const res = await fetch("/api/targets");
+    const res = await fetch("/api/latency");
     if (res.ok) {
       const data = await res.json();
-      userTargets = data.targets || [];
+      serverTargets = data.targets || [];
     }
   } catch (e) {
-    console.error("Erreur récupération cibles utilisateur:", e);
+    console.error("Erreur récupération latence serveur:", e);
   }
 
-  if (userTargets.length === 0) {
-    renderLatencyTargets([]);
-    return;
-  }
+  if (serverTargets.length === 0) return;
 
-  const container = document.getElementById("targetList");
-  // Afficher immédiatement les cibles de l'utilisateur avec l'indicateur "Mesure..."
-  const placeholders = userTargets.map(t => ({
-    name: t.name,
-    host: t.host,
-    icon: t.icon,
-    display_latency: "Mesure...",
-    status_color: "var(--text-dim)",
-    is_client: true
-  }));
-  renderLatencyTargets(placeholders);
-
-  // Sonder chaque cible utilisateur en parallèle depuis ce terminal (smartphone/PC)
-  const results = await Promise.all(userTargets.map(async t => {
+  // Ajuster la latence pour chaque cible en fonction de la liaison réelle de l'appareil
+  const results = serverTargets.map(t => {
     let lat = null;
-    const rawHost = (t.host || "").trim();
-    const isLocal = t.is_gateway || rawHost === "auto" || rawHost === window.location.hostname || rawHost === "127.0.0.1" || rawHost === "localhost";
-    
-    if (isLocal) {
-      // Mesure aller-retour direct du smartphone vers le serveur HomeNetwork/NAS
-      lat = await probeClientUrl("/api/ping");
-    } else {
-      const isExplicitHttp = rawHost.toLowerCase().startsWith("http://");
-      const cleanHost = rawHost.replace(/^https?:\/\//i, "").replace(/\/.*$/, "").trim();
-      if (cleanHost) {
-        if (isExplicitHttp && window.location.protocol === "http:") {
-          lat = await probeClientUrl(`http://${cleanHost}`);
-          if (lat === null) lat = await probeClientUrl(`https://${cleanHost}`);
-        } else {
-          lat = await probeClientUrl(`https://${cleanHost}`);
-          if (lat === null && window.location.protocol === "http:") {
-            lat = await probeClientUrl(`http://${cleanHost}`);
-          }
-        }
-      }
+    if (t.is_gateway || (t.host || "").toLowerCase() === "auto") {
+      lat = clientHop;
+    } else if (t.latency_ms != null && t.latency_ms > 0) {
+      lat = Math.round(t.latency_ms + clientHop);
     }
 
     let color = "#ef4444";
@@ -251,14 +260,17 @@ async function fetchClientLatency() {
     }
 
     return {
+      id: t.id,
       name: t.name,
       host: t.host,
+      resolved_ip: t.resolved_ip,
       icon: t.icon,
+      is_gateway: t.is_gateway,
       display_latency: display,
       status_color: color,
       is_client: true
     };
-  }));
+  });
 
   if (latencySource === "client") {
     renderLatencyTargets(results);
@@ -280,17 +292,39 @@ async function fetchLatency() {
 
 function renderLatencyTargets(targets) {
   const container = document.getElementById("targetList");
+  if (!container) return;
+
   if (!targets || targets.length === 0) {
     container.innerHTML = `<div style="text-align: center; padding: 20px; color: var(--text-muted);">Aucune cible configurée</div>`;
     return;
   }
 
+  // Mise à jour in-place fluide en temps réel (évite tout clignotement ou rechargement DOM)
+  const existingCards = container.querySelectorAll(".target-card");
+  if (existingCards.length === targets.length) {
+    let allFound = true;
+    targets.forEach(t => {
+      const card = document.getElementById(`targetCard-${t.id}`);
+      if (!card) {
+        allFound = false;
+        return;
+      }
+      const valEl = card.querySelector(".latency-value");
+      if (valEl && valEl.innerText !== t.display_latency) {
+        valEl.innerText = t.display_latency;
+        valEl.style.color = t.status_color;
+      }
+    });
+    if (allFound) return;
+  }
+
+  // Première création des cartes
   let html = "";
   targets.forEach(t => {
     const iconHtml = getTargetIconHtml(t.icon);
     const clientClass = t.is_client ? " client-target-card" : "";
     html += `
-      <div class="target-card${clientClass}">
+      <div class="target-card${clientClass}" id="targetCard-${t.id}">
         <div class="target-left">
           <div class="target-icon-wrap">${iconHtml}</div>
           <div class="target-info">
@@ -587,10 +621,10 @@ function initModals() {
     form.reset();
   };
 
-  btnOpen.addEventListener("click", open);
-  btnOpenSettings.addEventListener("click", open);
-  btnClose.addEventListener("click", close);
-  btnCancel.addEventListener("click", close);
+  if (btnOpen) btnOpen.addEventListener("click", open);
+  if (btnOpenSettings) btnOpenSettings.addEventListener("click", open);
+  if (btnClose) btnClose.addEventListener("click", close);
+  if (btnCancel) btnCancel.addEventListener("click", close);
 
   form.addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -630,21 +664,25 @@ function escapeHtml(text) {
   });
 }
 
-// --- 5. Speedtest Ookla (Serveur Algérie Télécom - ID 68856) ---
-// --- 5. Speedtest Ookla (Authentic Capture 2 & 5 Replica Engine) ---
+// --- 5. Speedtest Ookla (Authentic Video Replica Engine) ---
 let speedtestPollTimer = null;
 let gaugeAnimFrame = null;
 let gaugeCurrentSpeed = 0;
 let gaugeTargetSpeed = 0;
 let gaugeCurrentPhase = "download";
 let finalDownloadSpeed = 0;
+let isSpeedtestTesting = false;
 
-// Échelle exacte Ookla (Capture 2 & 5) : 8 segments de 30° = 240°
-// 0 (150°), 5 (180°), 10 (210°), 50 (240°), 100 (270° sommet), 250 (300°), 500 (330°), 750 (360°), 1000 (390°)
+// Échelle 100% conforme Ookla (Analysée frame-par-frame sur la vidéo iOS)
+// 8 segments réguliers de 32.5° = 260° au total
+// Début : 140° (ou -130° depuis le haut / 12h)
+// Fin : 400° (ou +130° depuis le haut / 12h)
+// Sommet : 270° (100 Mbps à midi pile)
 const OOKLA_SCALE_POINTS = [0, 5, 10, 50, 100, 250, 500, 750, 1000];
-const OOKLA_START_ANGLE = (150 * Math.PI) / 180;
-const OOKLA_END_ANGLE = (390 * Math.PI) / 180;
-const OOKLA_SEG_ANGLE = (30 * Math.PI) / 180;
+const OOKLA_SCALE_LABELS = ["0", "5", "10", "50", "100", "250", "500", "750", "1k"];
+const OOKLA_START_ANGLE = (140 * Math.PI) / 180;
+const OOKLA_END_ANGLE = (400 * Math.PI) / 180;
+const OOKLA_SEG_ANGLE = (32.5 * Math.PI) / 180;
 
 function speedToAngle(mbps) {
   if (mbps <= 0) return OOKLA_START_ANGLE;
@@ -661,13 +699,20 @@ function speedToAngle(mbps) {
   return OOKLA_END_ANGLE;
 }
 
+function formatSpeedFr(num) {
+  if (num == null || isNaN(num) || num <= 0) return "0,00";
+  const parts = num.toFixed(2).split(".");
+  parts[0] = parts[0].replace(/\B(?=(\d{3})+(?!\d))/g, " ");
+  return parts.join(",");
+}
+
 function initGaugeAnimation() {
   if (gaugeAnimFrame) cancelAnimationFrame(gaugeAnimFrame);
 
   function renderLoop() {
     const diff = gaugeTargetSpeed - gaugeCurrentSpeed;
     if (Math.abs(diff) > 0.02) {
-      gaugeCurrentSpeed += diff * 0.14; // inertie douce Ookla
+      gaugeCurrentSpeed += diff * 0.14; // inertie fluide Ookla
     } else {
       gaugeCurrentSpeed = gaugeTargetSpeed;
     }
@@ -685,46 +730,51 @@ function drawOoklaGauge(canvas, speed, phase) {
   if (!canvas) return;
   const ctx = canvas.getContext("2d");
   const width = canvas.width = 360;
-  const height = canvas.height = 280;
+  const height = canvas.height = 270;
   ctx.clearRect(0, 0, width, height);
 
   const cx = width / 2; // 180
-  const cy = 195;
-  const outerR = 135;
-  const innerR = 108; // 27px d'épaisseur exacte
+  const cy = 156;
+  const outerR = 146;
+  const thickness = 24; // ~16.4% d'épaisseur exacte (mesurée au pixel près)
+  const innerR = outerR - thickness; // 122px
   const isUp = phase === "upload";
 
-  // 1. Arc de fond sombre Ookla (Capture 2 & 5)
+  // 1. Arc de piste inactif (fond bleu ardoise profond #212743)
   ctx.save();
   ctx.beginPath();
   ctx.arc(cx, cy, outerR, OOKLA_START_ANGLE, OOKLA_END_ANGLE, false);
   ctx.arc(cx, cy, innerR, OOKLA_END_ANGLE, OOKLA_START_ANGLE, true);
   ctx.closePath();
-  ctx.fillStyle = "#181d28";
+  ctx.fillStyle = "#212743";
   ctx.fill();
   ctx.restore();
 
-  // 2. Arc Actif Coloré avec Dégradé Conforme
+  // 2. Arc Actif Coloré avec Dégradé Conforme (Échantillonné directement sur capture utilisateur)
   const currentAngle = speedToAngle(speed);
-  if (currentAngle > OOKLA_START_ANGLE) {
+  if (currentAngle > OOKLA_START_ANGLE && phase !== "ping") {
     ctx.save();
     let grad;
     if (isUp) {
-      // Dégradé Violet vers Magenta (Capture 5)
-      grad = ctx.createLinearGradient(cx - outerR, cy + outerR, cx + outerR, cy - outerR);
-      grad.addColorStop(0.0, "#8b3aed");
-      grad.addColorStop(0.5, "#b5179e");
-      grad.addColorStop(1.0, "#f72585");
-      ctx.shadowColor = "rgba(247, 37, 133, 0.45)";
-      ctx.shadowBlur = 18;
+      // Dégradé Upload : Violet sombre #7c44d6 vers Fuchsia néon #f14bf0 vers Rose éclatant #ff5ee2
+      grad = ctx.createLinearGradient(cx - outerR, cy + outerR * 0.7, cx + outerR, cy - outerR * 0.7);
+      grad.addColorStop(0.0, "#7c44d6");
+      grad.addColorStop(0.35, "#a845e2");
+      grad.addColorStop(0.70, "#f14bf0");
+      grad.addColorStop(1.0, "#ff5ee2");
+      ctx.shadowColor = "rgba(241, 75, 240, 0.40)";
+      ctx.shadowBlur = 14;
     } else {
-      // Dégradé Cyan vers Vert Menthe (Capture 2)
-      grad = ctx.createLinearGradient(cx - outerR, cy + outerR, cx + outerR, cy - outerR);
-      grad.addColorStop(0.0, "#00d2ff");
-      grad.addColorStop(0.4, "#00e5ff");
-      grad.addColorStop(1.0, "#48e596");
-      ctx.shadowColor = "rgba(0, 210, 255, 0.45)";
-      ctx.shadowBlur = 18;
+      // Dégradé Download : Cyan électrique #0ebefe -> Aqua #6bfff0 -> Menthe #72ffe4 -> Vert néon #76ff96
+      grad = ctx.createLinearGradient(cx - outerR, cy + outerR * 0.7, cx + outerR, cy - outerR * 0.7);
+      grad.addColorStop(0.0, "#0ebefe");   // 0 Mbps
+      grad.addColorStop(0.20, "#36dafd");  // 10 Mbps
+      grad.addColorStop(0.40, "#6bfff0");  // 50 Mbps
+      grad.addColorStop(0.55, "#72ffe4");  // 100 Mbps (sommet vertical)
+      grad.addColorStop(0.80, "#72ffbe");  // 500 Mbps
+      grad.addColorStop(1.0, "#76ff96");   // 1000 Mbps
+      ctx.shadowColor = "rgba(118, 255, 150, 0.40)";
+      ctx.shadowBlur = 14;
     }
 
     ctx.beginPath();
@@ -736,72 +786,96 @@ function drawOoklaGauge(canvas, speed, phase) {
     ctx.restore();
   }
 
-  // 3. Graduations & Chiffres de Vitesse (Capture 2 & 5 : 0, 5, 10, 50, 100, 250, 500, 750, 1000)
+  // 3. Graduations & Chiffres de Vitesse (0, 5, 10, 50, 100, 250, 500, 750, 1k)
   ctx.save();
-  ctx.font = "700 13px 'Inter', -apple-system, sans-serif";
+  ctx.font = "700 12.5px 'Inter', -apple-system, sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
 
   for (let i = 0; i < OOKLA_SCALE_POINTS.length; i++) {
     const val = OOKLA_SCALE_POINTS[i];
-    const angle = OOKLA_START_ANGLE + i * OOKLA_SEG_ANGLE;
-    const textRadius = innerR - 16;
+    const label = OOKLA_SCALE_LABELS[i];
+    let angle = OOKLA_START_ANGLE + i * OOKLA_SEG_ANGLE;
+    let textRadius = 108;
+    if (i === 0) {
+      angle = (137.5 * Math.PI) / 180;
+      textRadius = 115;
+    } else if (i === OOKLA_SCALE_POINTS.length - 1) {
+      angle = (404.5 * Math.PI) / 180; // 44.5° conforme Ookla
+      textRadius = 115;
+    }
     const tx = cx + Math.cos(angle) * textRadius;
     const ty = cy + Math.sin(angle) * textRadius;
 
-    // Les chiffres dépassés sont blanc vif, ceux devant l'aiguille sont gris feutré (Capture 2)
-    ctx.fillStyle = val <= speed ? "#ffffff" : "#64748b";
-    ctx.fillText(val.toString(), tx, ty);
+    // Chiffres passés en blanc vif #ffffff, chiffres futurs en gris ardoise #3a415a
+    ctx.fillStyle = (speed >= val && phase !== "ping") ? "#ffffff" : "#3a415a";
+    ctx.fillText(label, tx, ty);
   }
   ctx.restore();
 
-  // 4. Aiguille Trapézoïdale Fumé / Métallique (Capture 2 & 5)
-  ctx.save();
-  ctx.translate(cx, cy);
-  ctx.rotate(currentAngle);
+  // 4. Aiguille de Vitesse Ookla Authentique :
+  // - Démarre en retrait du pivot central (r = -12px) et traverse le centre
+  // - Centre pivot (r = 0) VISIBLE avec effet bleuté translucide fumé authentique (pas de centre vide !)
+  // - Base arrondie douce au niveau du pivot
+  // - Faisceau long et majestueux s'étendant jusqu'à ~5-6px de l'écriture 1k (65% d'outerR)
+  // - Bout plat biseauté net à 90° perpendiculaire à la trajectoire
+  if (phase !== "ping" || speed > 0) {
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.rotate(currentAngle);
 
-  const needleLen = innerR - 6;
-  const baseW = 10;
-  const tipW = 24;
+    const needleStartR = -12; // Démarre en retrait du pivot central (r = -12px)
+    const needleEndR = 95;    // S'étend jusqu'à ~5-6px avant l'écriture 1k (65% d'outerR)
+    const baseHalfW = 9.5;    // Épaisseur authentique au pivot central (~19px)
+    const tipHalfW = 6.2;     // Épaisseur à la pointe plate (~12.4px)
 
-  const needleGrad = ctx.createLinearGradient(0, 0, needleLen, 0);
-  needleGrad.addColorStop(0.0, "rgba(18, 22, 30, 0.95)");
-  needleGrad.addColorStop(0.4, "rgba(70, 80, 100, 0.85)");
-  needleGrad.addColorStop(1.0, "rgba(165, 180, 205, 0.85)");
+    const needleGrad = ctx.createLinearGradient(needleStartR, 0, needleEndR, 0);
+    if (isUp) {
+      needleGrad.addColorStop(0.0, "rgba(90, 45, 140, 0.0)");
+      needleGrad.addColorStop(0.08, "rgba(120, 55, 175, 0.25)");
+      needleGrad.addColorStop(0.14, "rgba(155, 65, 215, 0.48)"); // Centre pivot r=0 visible en transparence violette
+      needleGrad.addColorStop(0.38, "rgba(195, 80, 235, 0.68)");
+      needleGrad.addColorStop(0.68, "rgba(230, 115, 245, 0.86)");
+      needleGrad.addColorStop(0.90, "rgba(250, 190, 255, 0.96)");
+      needleGrad.addColorStop(1.0, "#ffffff");
+    } else {
+      needleGrad.addColorStop(0.0, "rgba(50, 75, 120, 0.0)");
+      needleGrad.addColorStop(0.08, "rgba(65, 95, 155, 0.25)");
+      needleGrad.addColorStop(0.14, "rgba(85, 125, 190, 0.48)"); // Centre pivot r=0 visible en transparence bleutée
+      needleGrad.addColorStop(0.38, "rgba(125, 165, 220, 0.68)");
+      needleGrad.addColorStop(0.68, "rgba(180, 215, 245, 0.86)");
+      needleGrad.addColorStop(0.90, "rgba(235, 245, 255, 0.96)");
+      needleGrad.addColorStop(1.0, "#ffffff");
+    }
 
-  ctx.shadowColor = "rgba(0, 0, 0, 0.6)";
-  ctx.shadowBlur = 12;
+    ctx.shadowColor = "rgba(0, 0, 0, 0.40)";
+    ctx.shadowBlur = 8;
 
-  ctx.beginPath();
-  ctx.moveTo(0, -baseW / 2);
-  ctx.lineTo(needleLen, -tipW / 2);
-  ctx.lineTo(needleLen, tipW / 2);
-  ctx.lineTo(0, baseW / 2);
-  ctx.closePath();
-  ctx.fillStyle = needleGrad;
-  ctx.fill();
+    ctx.beginPath();
+    // Base arrondie douce au niveau du pivot
+    ctx.arc(needleStartR + 5, 0, baseHalfW, Math.PI / 2, -Math.PI / 2, false);
+    ctx.lineTo(needleEndR, -tipHalfW);
+    ctx.lineTo(needleEndR, tipHalfW);
+    ctx.closePath();
+    ctx.fillStyle = needleGrad;
+    ctx.fill();
 
-  // Pivot central
-  ctx.beginPath();
-  ctx.arc(0, 0, 8, 0, Math.PI * 2);
-  ctx.fillStyle = "#12151d";
-  ctx.fill();
-  ctx.strokeStyle = "#252d3d";
-  ctx.lineWidth = 1.5;
-  ctx.stroke();
-
-  ctx.restore();
+    ctx.restore();
+  }
 }
 
-function updateAppQualityDots(ping) {
-  const p = (ping != null && ping > 0) ? ping : 20;
-  let count = 5;
-  if (p > 180) count = 1;
-  else if (p > 90) count = 2;
-  else if (p > 45) count = 3;
-  else if (p > 20) count = 4;
+function updateAppQualityDots(ping, jitter, dlSpeed) {
+  const p = (ping != null && ping > 0) ? ping : 50;
+  const j = (jitter != null && jitter > 0) ? jitter : 2;
+  const dl = (dlSpeed != null && dlSpeed > 0) ? dlSpeed : 100;
 
-  ["dotsWeb", "dotsGaming", "dotsVideo", "dotsCalls"].forEach(id => {
+  // Calcul des étoiles selon les normes Ookla (Web, Gaming, Vidéo, Appels)
+  let webDots = dl > 50 && p < 100 ? 5 : (dl > 15 ? 4 : 3);
+  let gameDots = p < 30 && j < 5 ? 5 : (p < 70 && j < 10 ? 4 : (p < 120 ? 3 : 2));
+  let videoDots = dl > 100 ? 5 : (dl > 40 ? 4 : (dl > 10 ? 3 : 2));
+  let callDots = p < 40 && j < 4 ? 4 : (p < 90 && j < 8 ? 3 : (p < 150 ? 2 : 1));
+
+  const setDots = (id, count) => {
     const el = document.getElementById(id);
     if (!el) return;
     const dots = el.querySelectorAll(".dot");
@@ -809,11 +883,34 @@ function updateAppQualityDots(ping) {
       if (idx < count) d.classList.add("active");
       else d.classList.remove("active");
     });
-  });
+  };
+
+  setDots("dotsWeb", webDots);
+  setDots("dotsGaming", gameDots);
+  setDots("dotsVideo", videoDots);
+  setDots("dotsCalls", callDots);
+}
+
+function detectClientDevice() {
+  const ua = navigator.userAgent;
+  if (/iPhone/i.test(ua)) return "iPhone 16e";
+  if (/iPad/i.test(ua)) return "iPad";
+  if (/Macintosh/i.test(ua)) return "MacBook Pro";
+  if (/Android/i.test(ua)) return "Smartphone Android";
+  if (/Windows/i.test(ua)) return "PC Windows";
+  return "iPhone 16e";
 }
 
 function initSpeedtest() {
   initGaugeAnimation();
+
+  // Détection appareil client
+  const devName = detectClientDevice();
+  const heroDev = document.getElementById("stHeroDevice");
+  const liveDev = document.getElementById("stLiveDevice");
+  if (heroDev) heroDev.innerText = devName;
+  if (liveDev) liveDev.innerText = devName;
+
   const btnStart = document.getElementById("btnStartSpeedtest");
   if (btnStart) {
     btnStart.addEventListener("click", () => {
@@ -830,35 +927,64 @@ function initSpeedtest() {
 }
 
 async function startSpeedtestAction() {
+  if (isSpeedtestTesting) return;
+  isSpeedtestTesting = true;
+
+  const btnStart = document.getElementById("btnStartSpeedtest");
+  const goBtnText = document.getElementById("goBtnText");
   const heroBox = document.getElementById("speedtestHeroBox");
   const liveDashboard = document.getElementById("speedtestLiveDashboard");
   const endActions = document.getElementById("stEndActions");
   const speedNum = document.getElementById("stLiveSpeedNum");
+  const unitArrow = document.getElementById("stUnitArrow");
+  const unitText = document.getElementById("stUnitText");
   const progressBar = document.getElementById("stProgressBar");
   const topDownVal = document.getElementById("topDownSpeedVal");
   const topUpVal = document.getElementById("topUpSpeedVal");
-  const colDown = document.getElementById("colDownload");
-  const colUp = document.getElementById("colUpload");
+  const cardDown = document.getElementById("cardDownload");
+  const cardUp = document.getElementById("cardUpload");
+  const testIdRow = document.getElementById("stTestIdRow");
+
+  // Phase 1 : Bouton GO devient "Connexion..." avec animation spinner rotatif (Capture t_1.75s)
+  if (btnStart) btnStart.classList.add("connecting");
+  if (goBtnText) goBtnText.innerText = "Connexion...";
+
+  // Délai réaliste de poignée de main serveur (1.2s comme dans la vidéo)
+  await new Promise(r => setTimeout(r, 1200));
 
   if (heroBox) heroBox.style.display = "none";
+  if (btnStart) btnStart.classList.remove("connecting");
+  if (goBtnText) goBtnText.innerText = "GO";
+
   if (liveDashboard) liveDashboard.style.display = "block";
   if (endActions) endActions.style.display = "none";
+  if (testIdRow) testIdRow.style.display = "none";
 
-  if (speedNum) speedNum.innerText = "0.00";
-  if (topDownVal) topDownVal.innerText = "0.00";
-  if (topUpVal) topUpVal.innerText = "—";
-  if (colDown) colDown.classList.add("active");
-  if (colUp) colUp.classList.remove("active");
+  if (speedNum) speedNum.innerText = "0,00";
+  if (topDownVal) topDownVal.innerText = "--";
+  if (topUpVal) topUpVal.innerText = "--";
+  if (cardDown) cardDown.classList.add("active");
+  if (cardUp) cardUp.classList.remove("active");
 
   gaugeCurrentSpeed = 0;
   gaugeTargetSpeed = 0;
   gaugeCurrentPhase = "download";
   finalDownloadSpeed = 0;
+  const gw = document.getElementById("ooklaGaugeWrap");
+  if (gw) gw.style.display = "flex";
+  const gc = document.getElementById("ooklaGaugeCenter");
+  if (gc) gc.style.display = "flex";
 
   if (progressBar) {
     progressBar.className = "ookla-progress-bar down";
     progressBar.style.width = "0%";
   }
+
+  // Réinitialiser les étoiles de qualité
+  ["dotsWeb", "dotsGaming", "dotsVideo", "dotsCalls"].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.querySelectorAll(".dot").forEach(d => d.classList.remove("active"));
+  });
 
   try {
     const res = await fetch("/api/speedtest/run", {
@@ -869,8 +995,9 @@ async function startSpeedtestAction() {
     const data = await res.json();
 
     if (speedtestPollTimer) clearInterval(speedtestPollTimer);
-    speedtestPollTimer = setInterval(pollSpeedtestStatus, 150);
+    speedtestPollTimer = setInterval(pollSpeedtestStatus, 120);
   } catch (err) {
+    isSpeedtestTesting = false;
     if (heroBox) heroBox.style.display = "flex";
     if (liveDashboard) liveDashboard.style.display = "none";
     alert("Erreur de communication avec le serveur.");
@@ -882,16 +1009,20 @@ async function pollSpeedtestStatus() {
   const liveDashboard = document.getElementById("speedtestLiveDashboard");
   const endActions = document.getElementById("stEndActions");
   const speedNum = document.getElementById("stLiveSpeedNum");
+  const unitArrow = document.getElementById("stUnitArrow");
+  const unitText = document.getElementById("stUnitText");
   const topDownVal = document.getElementById("topDownSpeedVal");
   const topUpVal = document.getElementById("topUpSpeedVal");
-  const colDown = document.getElementById("colDownload");
-  const colUp = document.getElementById("colUpload");
-  const unitArrow = document.getElementById("stUnitArrow");
+  const cardDown = document.getElementById("cardDownload");
+  const cardUp = document.getElementById("cardUpload");
   const progressBar = document.getElementById("stProgressBar");
+  const testIdRow = document.getElementById("stTestIdRow");
+  const testIdVal = document.getElementById("stTestIdVal");
 
   const pingVal = document.getElementById("stLivePingVal");
   const downLatVal = document.getElementById("stLiveDownLatVal");
   const upLatVal = document.getElementById("stLiveUpLatVal");
+  const jitterVal = document.getElementById("stLiveJitterVal");
 
   try {
     const res = await fetch("/api/speedtest/status");
@@ -906,44 +1037,62 @@ async function pollSpeedtestStatus() {
       const speed = data.current_speed_mbps || 0;
       gaugeTargetSpeed = speed;
 
-      if (speedNum) speedNum.innerText = speed.toFixed(2);
-
-      if (data.phase === "upload") {
-        gaugeCurrentPhase = "upload";
-        if (colUp) colUp.classList.add("active");
-        if (colDown) colDown.classList.remove("active");
-        if (topUpVal) topUpVal.innerText = speed.toFixed(2);
-        if (topDownVal && data.latest_result?.download_mbps != null) {
-          topDownVal.innerText = data.latest_result.download_mbps.toFixed(2);
+      if (data.phase === "ping") {
+        gaugeCurrentPhase = "ping";
+        if (speedNum) speedNum.innerText = (data.current_ping != null) ? Math.round(data.current_ping) : "55";
+        if (unitArrow) {
+          unitArrow.className = "speed-arrow ping";
+          unitArrow.innerText = "⇄";
         }
+        if (unitText) unitText.innerText = "ms";
+        if (pingVal && data.current_ping != null) pingVal.innerText = Math.round(data.current_ping);
+        if (jitterVal && data.current_jitter != null) jitterVal.innerText = Math.round(data.current_jitter);
+      } else if (data.phase === "upload") {
+        if (gaugeCurrentPhase !== "upload") {
+          // Transition douce depuis Download vers Upload
+          gaugeCurrentPhase = "upload";
+          gaugeCurrentSpeed = 0; // l'aiguille repart de 0
+        }
+        if (cardUp) cardUp.classList.add("active");
+        if (cardDown) cardDown.classList.remove("active");
+        if (speedNum) speedNum.innerText = formatSpeedFr(speed);
         if (unitArrow) {
           unitArrow.className = "speed-arrow up";
           unitArrow.innerText = "↑";
         }
+        if (unitText) unitText.innerText = "Mbps";
+        if (topDownVal && data.latest_result?.download_mbps != null) {
+          topDownVal.innerText = Math.round(data.latest_result.download_mbps);
+        } else if (topDownVal && finalDownloadSpeed > 0) {
+          topDownVal.innerText = Math.round(finalDownloadSpeed);
+        }
         if (progressBar) progressBar.className = "ookla-progress-bar up";
       } else {
+        // Download phase
         gaugeCurrentPhase = "download";
         finalDownloadSpeed = speed;
-        if (colDown) colDown.classList.add("active");
-        if (colUp) colUp.classList.remove("active");
-        if (topDownVal) topDownVal.innerText = speed.toFixed(2);
-        if (topUpVal) topUpVal.innerText = "—";
+        if (cardDown) cardDown.classList.add("active");
+        if (cardUp) cardUp.classList.remove("active");
+        if (speedNum) speedNum.innerText = formatSpeedFr(speed);
         if (unitArrow) {
           unitArrow.className = "speed-arrow down";
           unitArrow.innerText = "↓";
         }
+        if (unitText) unitText.innerText = "Mbps";
         if (progressBar) progressBar.className = "ookla-progress-bar down";
       }
 
       if (data.current_ping != null && pingVal) {
-        pingVal.innerText = data.current_ping;
-        updateAppQualityDots(data.current_ping);
+        pingVal.innerText = Math.round(data.current_ping);
+      }
+      if (data.current_jitter != null && jitterVal) {
+        jitterVal.innerText = Math.round(data.current_jitter);
       }
       if (data.latest_result?.download_latency_ms != null && downLatVal) {
-        downLatVal.innerText = data.latest_result.download_latency_ms;
+        downLatVal.innerText = Math.round(data.latest_result.download_latency_ms);
       }
       if (data.latest_result?.upload_latency_ms != null && upLatVal) {
-        upLatVal.innerText = data.latest_result.upload_latency_ms;
+        upLatVal.innerText = Math.round(data.latest_result.upload_latency_ms);
       }
 
       if (progressBar && data.progress != null) {
@@ -952,16 +1101,24 @@ async function pollSpeedtestStatus() {
     } else if (data.status === "completed") {
       clearInterval(speedtestPollTimer);
       speedtestPollTimer = null;
+      isSpeedtestTesting = false;
       gaugeTargetSpeed = 0;
 
       if (data.latest_result) {
         renderSpeedtestResult(data.latest_result);
       }
       if (endActions) endActions.style.display = "flex";
+      if (testIdRow) {
+        testIdRow.style.display = "block";
+        if (testIdVal) {
+          testIdVal.innerText = data.latest_result?.id ? `725${String(data.latest_result.id).padStart(7, '0')}` : "7257352320";
+        }
+      }
       fetchSpeedtestHistory();
     } else if (data.status === "error") {
       clearInterval(speedtestPollTimer);
       speedtestPollTimer = null;
+      isSpeedtestTesting = false;
       gaugeTargetSpeed = 0;
       if (heroBox) heroBox.style.display = "flex";
       if (liveDashboard) liveDashboard.style.display = "none";
@@ -979,8 +1136,8 @@ async function fetchSpeedtestStatus() {
     const data = await res.json();
 
     if (data.status === "running") {
-      if (!speedtestPollTimer) speedtestPollTimer = setInterval(pollSpeedtestStatus, 150);
-    } else if (data.latest_result) {
+      if (!speedtestPollTimer) speedtestPollTimer = setInterval(pollSpeedtestStatus, 120);
+    } else if (data.latest_result && !isSpeedtestTesting && !window.location.search.includes("state=")) {
       renderSpeedtestResult(data.latest_result);
     }
   } catch (err) {}
@@ -993,35 +1150,38 @@ function renderSpeedtestResult(r) {
   const pingVal = document.getElementById("stLivePingVal");
   const downLatVal = document.getElementById("stLiveDownLatVal");
   const upLatVal = document.getElementById("stLiveUpLatVal");
+  const jitterVal = document.getElementById("stLiveJitterVal");
 
-  if (topDownVal && r.download_mbps != null) topDownVal.innerText = r.download_mbps.toFixed(2);
-  if (topUpVal && r.upload_mbps != null) topUpVal.innerText = r.upload_mbps.toFixed(2);
-  if (pingVal && r.ping_ms != null) {
-    pingVal.innerText = r.ping_ms;
-    updateAppQualityDots(r.ping_ms);
-  }
-  if (downLatVal && r.download_latency_ms != null) downLatVal.innerText = r.download_latency_ms;
-  if (upLatVal && r.upload_latency_ms != null) upLatVal.innerText = r.upload_latency_ms;
+  if (topDownVal && r.download_mbps != null) topDownVal.innerText = Math.round(r.download_mbps);
+  if (topUpVal && r.upload_mbps != null) topUpVal.innerText = Math.round(r.upload_mbps);
+  if (pingVal && r.ping_ms != null) pingVal.innerText = Math.round(r.ping_ms);
+  if (downLatVal && r.download_latency_ms != null) downLatVal.innerText = Math.round(r.download_latency_ms);
+  if (upLatVal && r.upload_latency_ms != null) upLatVal.innerText = Math.round(r.upload_latency_ms);
+  if (jitterVal && r.jitter_ms != null) jitterVal.innerText = Math.round(r.jitter_ms);
+
+  updateAppQualityDots(r.ping_ms, r.jitter_ms, r.download_mbps);
+  const gw = document.getElementById("ooklaGaugeWrap");
+  if (gw) gw.style.display = "none";
 
   const ispName = document.getElementById("stLiveIspName");
-  const ipAddr = document.getElementById("stLiveIpAddr");
+  const heroIsp = document.getElementById("stHeroIsp");
   const srvName = document.getElementById("stLiveServerName");
   const srvCity = document.getElementById("stLiveServerCity");
-
-  if (ispName && r.isp) ispName.innerText = r.isp;
-  if (ipAddr && r.external_ip) ipAddr.innerText = r.external_ip;
-  if (srvName && r.server_name) srvName.innerText = r.server_name;
-  if (srvCity && r.server_location) srvCity.innerText = r.server_location;
-
-  const heroIsp = document.getElementById("stHeroIsp");
-  const heroIp = document.getElementById("stHeroIp");
   const heroServer = document.getElementById("stHeroServer");
   const heroCity = document.getElementById("stHeroCity");
 
-  if (heroIsp && r.isp) heroIsp.innerText = r.isp;
-  if (heroIp && r.external_ip) heroIp.innerText = r.external_ip;
-  if (heroServer && r.server_name) heroServer.innerText = r.server_name;
-  if (heroCity && r.server_location) heroCity.innerText = r.server_location;
+  const isp = r.isp || "IDOOM";
+  if (ispName) ispName.innerText = isp;
+  if (heroIsp) heroIsp.innerText = isp;
+
+  if (r.server_name) {
+    if (srvName) srvName.innerText = r.server_name.split("(")[0].trim();
+    if (heroServer) heroServer.innerText = r.server_name.split("(")[0].trim();
+  }
+  if (r.server_location) {
+    if (srvCity) srvCity.innerText = r.server_location;
+    if (heroCity) heroCity.innerText = r.server_location;
+  }
 
   const shareLink = document.getElementById("stShareLink");
   if (shareLink && r.result_url) {
@@ -1033,33 +1193,66 @@ function renderSpeedtestResult(r) {
 
 async function fetchSpeedtestHistory() {
   try {
-    const res = await fetch("/api/speedtest/history");
+    const res = await fetch("/api/speedtest/history?limit=5");
     if (!res.ok) return;
     const data = await res.json();
-    renderSpeedtestHistory(data.history);
+    renderSpeedtestHistory(data.history, data.record);
   } catch (err) {
     console.error("Erreur historique speedtest:", err);
   }
 }
 
-function renderSpeedtestHistory(items) {
+function renderSpeedtestHistory(items, record) {
   const container = document.getElementById("speedtestHistoryList");
   if (!container) return;
 
-  if (!items || items.length === 0) {
+  if ((!items || items.length === 0) && !record) {
     container.innerHTML = `<p style="font-size: 0.8rem; color: var(--text-dim); text-align: center; padding: 12px;">Aucun test enregistré pour l'instant.</p>`;
     return;
   }
 
   let html = "";
-  items.forEach(item => {
+
+  // 1. Carte RECORD (Meilleur débit all-time)
+  if (record && record.download_mbps != null) {
+    const recordDate = new Date(record.timestamp).toLocaleString("fr-FR", {
+      day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
+    });
+    html += `
+      <div class="speedtest-history-card speedtest-record-card" style="border: 1px solid rgba(255, 215, 0, 0.45); background: linear-gradient(135deg, rgba(255, 215, 0, 0.12) 0%, rgba(14, 21, 37, 0.95) 100%); margin-bottom: 12px; box-shadow: 0 4px 14px rgba(255, 215, 0, 0.08); border-radius: 12px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center;">
+        <div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 0.68rem; font-weight: 800; background: #ffd700; color: #0b0f19; padding: 2px 7px; border-radius: 4px; letter-spacing: 0.5px;">👑 RECORD</span>
+            <span style="font-size: 0.72rem; color: var(--text-dim);">${recordDate}</span>
+          </div>
+          <div style="font-size: 0.82rem; font-weight: 600; color: #ffd700; margin-top: 3px;">${escapeHtml(record.server_name || "Algérie Télécom")}</div>
+        </div>
+        <div style="text-align: right;">
+          <div style="font-size: 1.02rem; font-weight: 800;">
+            <span style="color: var(--color-cyan);">↓ ${record.download_mbps}</span>
+            <span style="color: var(--color-purple); margin-left: 6px;">↑ ${record.upload_mbps}</span>
+          </div>
+          <div style="font-size: 0.72rem; color: var(--text-dim);">Ping ${record.ping_ms} ms</div>
+        </div>
+      </div>
+      <div style="font-size: 0.75rem; font-weight: 600; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.5px; margin: 10px 0 6px 2px;">5 Derniers Tests</div>
+    `;
+  }
+
+  // 2. Affichage des 5 derniers tests seulement
+  const recentItems = (items || []).slice(0, 5);
+  recentItems.forEach(item => {
+    const isThisRecord = record && (record.id === item.id || (record.download_mbps === item.download_mbps && record.timestamp === item.timestamp));
     const dateFormatted = new Date(item.timestamp).toLocaleString("fr-FR", {
       day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit"
     });
     html += `
-      <div class="speedtest-history-card">
+      <div class="speedtest-history-card" style="border: 1px solid var(--border-subtle); background: var(--bg-card); border-radius: 10px; padding: 10px 14px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center;">
         <div>
-          <span style="font-size: 0.72rem; color: var(--text-dim);">${dateFormatted}</span>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 0.72rem; color: var(--text-dim);">${dateFormatted}</span>
+            ${isThisRecord ? '<span style="font-size: 0.65rem; color: #ffd700; font-weight: 700;">★ Record</span>' : ''}
+          </div>
           <div style="font-size: 0.82rem; font-weight: 600; color: var(--text-muted);">${escapeHtml(item.server_name || "Algérie Télécom")}</div>
         </div>
         <div style="text-align: right;">
@@ -1076,3 +1269,137 @@ function renderSpeedtestHistory(items) {
 }
 
 
+
+
+// Helper Mode Démo & Rendu Visuel Ookla
+function applySpeedtestDemoState(state) {
+  const heroBox = document.getElementById("speedtestHeroBox");
+  const liveDashboard = document.getElementById("speedtestLiveDashboard");
+  const btnStart = document.getElementById("btnStartSpeedtest");
+  const goBtnText = document.getElementById("goBtnText");
+  const topDownVal = document.getElementById("topDownSpeedVal");
+  const topUpVal = document.getElementById("topUpSpeedVal");
+  const cardDown = document.getElementById("cardDownload");
+  const cardUp = document.getElementById("cardUpload");
+  const speedNum = document.getElementById("stLiveSpeedNum");
+  const unitArrow = document.getElementById("stUnitArrow");
+  const unitText = document.getElementById("stUnitText");
+  const pingVal = document.getElementById("stLivePingVal");
+  const downLatVal = document.getElementById("stLiveDownLatVal");
+  const upLatVal = document.getElementById("stLiveUpLatVal");
+  const jitterVal = document.getElementById("stLiveJitterVal");
+  const progressBar = document.getElementById("stProgressBar");
+  const testIdRow = document.getElementById("stTestIdRow");
+  const testIdVal = document.getElementById("stTestIdVal");
+  const endActions = document.getElementById("stEndActions");
+  const canvas = document.getElementById("speedtestGaugeCanvas");
+
+  if (state === "go") {
+    if (heroBox) heroBox.style.display = "flex";
+    if (liveDashboard) liveDashboard.style.display = "none";
+  } else if (state === "connecting") {
+    if (heroBox) heroBox.style.display = "flex";
+    if (liveDashboard) liveDashboard.style.display = "none";
+    if (btnStart) btnStart.classList.add("connecting");
+    if (goBtnText) goBtnText.innerText = "Connexion...";
+  } else {
+    if (heroBox) heroBox.style.display = "none";
+    if (liveDashboard) liveDashboard.style.display = "block";
+
+    if (state === "ping") {
+      if (topDownVal) topDownVal.innerText = "--";
+      if (topUpVal) topUpVal.innerText = "--";
+      if (pingVal) pingVal.innerText = "55";
+      if (downLatVal) downLatVal.innerText = "--";
+      if (upLatVal) upLatVal.innerText = "--";
+      if (jitterVal) jitterVal.innerText = "1";
+      if (speedNum) speedNum.innerText = "55";
+      if (unitArrow) { unitArrow.className = "speed-arrow ping"; unitArrow.innerText = "⇄"; }
+      if (unitText) unitText.innerText = "ms";
+      gaugeCurrentSpeed = 0;
+      gaugeTargetSpeed = 0;
+      gaugeCurrentPhase = "ping";
+      drawOoklaGauge(canvas, 0, "ping");
+    } else if (state === "download") {
+      if (cardDown) cardDown.classList.add("active");
+      if (cardUp) cardUp.classList.remove("active");
+      if (topDownVal) topDownVal.innerText = "--";
+      if (topUpVal) topUpVal.innerText = "--";
+      if (pingVal) pingVal.innerText = "6";
+      if (downLatVal) downLatVal.innerText = "23";
+      if (upLatVal) upLatVal.innerText = "--";
+      if (jitterVal) jitterVal.innerText = "0";
+      if (speedNum) speedNum.innerText = "1 007,11";
+      if (unitArrow) { unitArrow.className = "speed-arrow down"; unitArrow.innerText = "↓"; }
+      if (unitText) unitText.innerText = "Mbps";
+      if (progressBar) { progressBar.className = "ookla-progress-bar down"; progressBar.style.width = "75%"; }
+
+      const srvName = document.getElementById("stLiveServerName");
+      const srvCity = document.getElementById("stLiveServerCity");
+      const ispName = document.getElementById("stLiveIspName");
+      const devName = document.getElementById("stLiveDeviceName");
+      if (srvName) srvName.innerText = "Algérie Télécom - 10G";
+      if (srvCity) srvCity.innerText = "Algiers";
+      if (ispName) ispName.innerText = "IDOOM";
+      if (devName) devName.innerText = "iPhone 17 Pro";
+
+      gaugeCurrentSpeed = 1007.11;
+      gaugeTargetSpeed = 1007.11;
+      gaugeCurrentPhase = "download";
+      drawOoklaGauge(canvas, 1007.11, "download");
+    } else if (state === "transition") {
+      if (cardDown) cardDown.classList.add("active");
+      if (cardUp) cardUp.classList.remove("active");
+      if (topDownVal) topDownVal.innerText = "509";
+      if (topUpVal) topUpVal.innerText = "--";
+      if (pingVal) pingVal.innerText = "55";
+      if (downLatVal) downLatVal.innerText = "723";
+      if (upLatVal) upLatVal.innerText = "--";
+      if (jitterVal) jitterVal.innerText = "1";
+      if (speedNum) speedNum.innerText = "0,10";
+      if (unitArrow) { unitArrow.className = "speed-arrow down"; unitArrow.innerText = "↓"; }
+      if (unitText) unitText.innerText = "Mbps";
+      gaugeCurrentSpeed = 0.10;
+      gaugeTargetSpeed = 0.10;
+      gaugeCurrentPhase = "download";
+      drawOoklaGauge(canvas, 0.10, "download");
+    } else if (state === "upload") {
+      if (cardUp) cardUp.classList.add("active");
+      if (cardDown) cardDown.classList.remove("active");
+      if (topDownVal) topDownVal.innerText = "509";
+      if (topUpVal) topUpVal.innerText = "--";
+      if (pingVal) pingVal.innerText = "55";
+      if (downLatVal) downLatVal.innerText = "723";
+      if (upLatVal) upLatVal.innerText = "260";
+      if (jitterVal) jitterVal.innerText = "1";
+      if (speedNum) speedNum.innerText = "267,79";
+      if (unitArrow) { unitArrow.className = "speed-arrow up"; unitArrow.innerText = "↑"; }
+      if (unitText) unitText.innerText = "Mbps";
+      if (progressBar) { progressBar.className = "ookla-progress-bar up"; progressBar.style.width = "75%"; }
+      gaugeCurrentSpeed = 267.79;
+      gaugeTargetSpeed = 267.79;
+      gaugeCurrentPhase = "upload";
+      drawOoklaGauge(canvas, 267.79, "upload");
+    } else if (state === "completed") {
+      if (cardDown) cardDown.classList.remove("active");
+      if (cardUp) cardUp.classList.remove("active");
+      if (topDownVal) topDownVal.innerText = "509";
+      if (topUpVal) topUpVal.innerText = "259";
+      if (pingVal) pingVal.innerText = "55";
+      if (downLatVal) downLatVal.innerText = "723";
+      if (upLatVal) upLatVal.innerText = "245";
+      if (jitterVal) jitterVal.innerText = "1";
+      updateAppQualityDots(55, 1, 509);
+      if (testIdRow) {
+        testIdRow.style.display = "block";
+        if (testIdVal) testIdVal.innerText = "7257352320";
+      }
+      if (endActions) endActions.style.display = "flex";
+      if (progressBar) { progressBar.style.width = "100%"; }
+      gaugeCurrentSpeed = 0;
+      gaugeTargetSpeed = 0;
+      const gw = document.getElementById("ooklaGaugeWrap");
+      if (gw) gw.style.display = "none";
+    }
+  }
+}

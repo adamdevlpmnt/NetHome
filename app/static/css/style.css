@@ -1,29 +1,29 @@
 :root {
-  --bg-primary: #000000;
-  --bg-secondary: #0c0f15;
-  --bg-card: #121620;
-  --bg-card-hover: #1a202c;
-  --border-color: #1e2432;
+  --bg-primary: #171627;
+  --bg-secondary: #141324;
+  --bg-card: #1c1b30;
+  --bg-card-hover: #23223c;
+  --border-color: #28273e;
   --text-main: #ffffff;
-  --text-muted: #94a3b8;
-  --text-dim: #64748b;
+  --text-muted: #8b92b0;
+  --text-dim: #535973;
   
   --color-green: #10b981;
   --color-orange: #f59e0b;
   --color-red: #ef4444;
-  --color-blue: #00d2ff;
+  --color-blue: #25caf9;
   
-  /* Authentic Ookla App Color Palette */
-  --color-cyan: #00d2ff;
-  --color-mint: #48e596;
-  --color-purple: #8b3aed;
-  --color-magenta: #f72585;
-  --color-gold: #ffb800;
+  /* Authentic Ookla App Color Palette (Sampled directly from iOS recording) */
+  --color-cyan: #25caf9;
+  --color-mint: #72ffd1;
+  --color-purple: #7c44d6;
+  --color-magenta: #f14bf0;
+  --color-gold: #ffd000;
 
-  --color-down: #00d2ff;
-  --color-down-glow: rgba(0, 210, 255, 0.45);
-  --color-up: #f72585;
-  --color-up-glow: rgba(247, 37, 133, 0.45);
+  --color-down: #25caf9;
+  --color-down-glow: rgba(37, 202, 249, 0.45);
+  --color-up: #f14bf0;
+  --color-up-glow: rgba(241, 75, 240, 0.45);
 
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -44,7 +44,7 @@ body {
   display: flex;
   flex-direction: column;
   padding-top: var(--safe-top);
-  padding-bottom: calc(75px + var(--safe-bottom));
+  padding-bottom: calc(94px + var(--safe-bottom));
   overflow-x: hidden;
 }
 
@@ -133,7 +133,8 @@ body {
   max-width: 680px;
   margin: 0 auto;
   width: 100%;
-  padding: 16px;
+  padding: 12px 16px 24px;
+  padding-top: max(12px, env(safe-area-inset-top));
   flex: 1;
 }
 
@@ -202,8 +203,12 @@ body {
   padding: 10px 14px;
   font-size: 0.78rem;
   color: var(--text-main);
-  margin-bottom: 14px;
   animation: fadeIn 0.2s ease;
+}
+
+@keyframes livePulse {
+  0%, 100% { transform: scale(0.9); opacity: 0.7; }
+  50% { transform: scale(1.25); opacity: 1; }
 }
 
 .latency-header-bar {
@@ -605,22 +610,29 @@ body {
   margin-bottom: 8px;
 }
 
-/* Bottom Navigation Bar (Modern iOS Native App Feel) */
+/* Bottom Navigation Bar (iOS 26/27 Floating Capsule Dock) */
 .bottom-nav {
   position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  bottom: calc(14px + var(--safe-bottom, 0px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: calc(100% - 28px);
+  max-width: 440px;
+  height: 64px;
   z-index: 90;
-  background: rgba(10, 13, 20, 0.94);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(22, 23, 26, 0.82);
+  backdrop-filter: blur(28px) saturate(190%);
+  -webkit-backdrop-filter: blur(28px) saturate(190%);
+  border-radius: 36px;
+  border: 0.5px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 12px 34px rgba(0, 0, 0, 0.55),
+              0 2px 8px rgba(0, 0, 0, 0.3),
+              inset 0 0.5px 0.5px rgba(255, 255, 255, 0.12);
   display: flex;
-  justify-content: space-around;
+  justify-content: space-evenly;
   align-items: center;
-  padding: 6px 12px calc(6px + var(--safe-bottom));
-  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.5);
+  padding: 4px 6px;
+  box-sizing: border-box;
 }
 
 .nav-item {
@@ -629,68 +641,98 @@ body {
   align-items: center;
   justify-content: center;
   gap: 3px;
-  background: none;
+  background: transparent;
   border: none;
-  color: var(--text-dim);
-  font-size: 0.72rem;
-  font-weight: 500;
+  color: #8e8e93;
   cursor: pointer;
-  padding: 6px 4px;
-  min-height: 52px;
-  min-width: 64px;
+  padding: 5px 12px;
+  height: 52px;
   flex: 1;
-  max-width: 90px;
-  border-radius: 12px;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  max-width: 96px;
+  border-radius: 26px;
+  transition: background 0.22s cubic-bezier(0.2, 0.8, 0.2, 1),
+              transform 0.15s ease,
+              color 0.18s ease;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  position: relative;
 }
 
 .nav-icon-wrap {
-  width: 44px;
-  height: 28px;
-  border-radius: 14px;
+  position: relative;
+  width: auto;
+  height: 22px;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .nav-item svg {
   width: 20px;
   height: 20px;
-  transition: transform 0.2s ease, stroke 0.2s ease;
+  color: #ffffff;
+  stroke: #ffffff;
+  stroke-width: 2.1;
+  transition: color 0.18s ease, stroke 0.18s ease;
 }
 
 .nav-item span {
-  font-size: 0.72rem;
-  font-weight: 600;
+  font-size: 0.68rem;
+  font-weight: 500;
   letter-spacing: -0.01em;
-  transition: color 0.2s ease;
+  color: #8e8e93;
+  transition: color 0.18s ease, font-weight 0.18s ease;
+  line-height: 1.1;
+  white-space: nowrap;
 }
 
+/* Hover on non-touch screens */
+@media (hover: hover) {
+  .nav-item:hover:not(.active) {
+    background: rgba(255, 255, 255, 0.05);
+  }
+}
+
+/* Press / active touch feedback (iOS Haptic Feel) */
 .nav-item:active {
-  transform: scale(0.93);
+  transform: scale(0.92);
 }
 
+/* Active tab style — iOS Capsule Highlight with System Blue */
 .nav-item.active {
-  color: #ffffff;
-}
-
-.nav-item.active .nav-icon-wrap {
-  background: rgba(0, 240, 255, 0.14);
-  box-shadow: 0 0 12px rgba(0, 240, 255, 0.25);
+  background: rgba(255, 255, 255, 0.09);
 }
 
 .nav-item.active svg {
-  color: var(--color-cyan);
-  stroke: var(--color-cyan);
-  transform: translateY(-1px);
+  color: #0a84ff;
+  stroke: #0a84ff;
+  transform: none;
 }
 
 .nav-item.active span {
-  color: var(--color-cyan);
+  color: #0a84ff;
+  font-weight: 600;
+}
+
+/* Support Badge de Notification iOS (ex: pastille rouge style Workloads) */
+.nav-badge {
+  position: absolute;
+  top: -4px;
+  right: -8px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  background: #ff3b30;
+  color: #ffffff;
+  font-size: 0.62rem;
   font-weight: 700;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
 }
 
 /* Modal Styling */
@@ -797,20 +839,26 @@ body {
 }
 
 /* --- Section Speedtest Ookla --- */
-/* --- Section Speedtest Ookla (Authentic Capture 2, 3, 4, 5 Replica) --- */
+/* --- Section Speedtest Ookla (Authentic Video Replica 100%) --- */
 .speedtest-hero-box {
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 40px 0 24px;
+  padding: 30px 0 20px;
   min-height: 420px;
 }
 
-/* Bouton GO Ookla avec anneaux concentriques (Capture 3 & 4) */
+.ookla-go-wrap {
+  margin: 30px 0 45px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .ookla-go-btn {
-  width: 190px;
-  height: 190px;
+  width: 172px;
+  height: 172px;
   border-radius: 50%;
   position: relative;
   background: transparent;
@@ -822,94 +870,119 @@ body {
   justify-content: center;
   user-select: none;
   -webkit-user-select: none;
-  margin-bottom: 40px;
 }
 
-.go-ring-outer {
+.go-spinner-svg {
   position: absolute;
   inset: 0;
-  border-radius: 50%;
-  border: 2px solid #00d2ff;
-  box-shadow: 0 0 25px rgba(0, 210, 255, 0.4), inset 0 0 15px rgba(0, 210, 255, 0.2);
-  animation: ooklaGlowPulse 2.5s infinite ease-in-out;
+  width: 100%;
+  height: 100%;
+  transform: rotate(-90deg);
+  overflow: visible;
+}
+
+.go-circle-base {
+  fill: none;
+  stroke: #25caf9;
+  stroke-width: 1.8;
+  opacity: 0.85;
+  filter: drop-shadow(0 0 10px rgba(37, 202, 249, 0.4));
   transition: all 0.3s ease;
 }
 
-.go-circle-core {
-  width: 164px;
-  height: 164px;
-  border-radius: 50%;
-  background: #14171a;
-  border: 1.5px solid rgba(0, 210, 255, 0.4);
+.go-circle-spinner {
+  fill: none;
+  stroke: #72ffd1;
+  stroke-width: 2.4;
+  stroke-dasharray: 477;
+  stroke-dashoffset: 477;
+  stroke-linecap: round;
+  filter: drop-shadow(0 0 12px rgba(114, 255, 209, 0.65));
+}
+
+.ookla-go-btn.connecting .go-circle-spinner {
+  stroke-dashoffset: 120;
+  animation: spinnerRotate 1.4s linear infinite;
+}
+
+@keyframes spinnerRotate {
+  0% { transform: rotate(0deg); transform-origin: 80px 80px; }
+  100% { transform: rotate(360deg); transform-origin: 80px 80px; }
+}
+
+.ookla-go-btn:hover .go-circle-base {
+  stroke: #72ffd1;
+  filter: drop-shadow(0 0 16px rgba(114, 255, 209, 0.7));
+}
+
+.go-label-wrap {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   justify-content: center;
-  box-shadow: inset 0 0 24px rgba(0, 0, 0, 0.85);
-  transition: all 0.2s ease;
-}
-
-.ookla-go-btn:hover .go-ring-outer {
-  box-shadow: 0 0 45px rgba(0, 210, 255, 0.7), inset 0 0 25px rgba(0, 210, 255, 0.35);
-  transform: scale(1.03);
-}
-
-.ookla-go-btn:active .go-circle-core {
-  transform: scale(0.96);
 }
 
 .go-text {
   font-family: 'Inter', -apple-system, sans-serif;
-  font-size: 2.9rem;
+  font-size: 2.7rem;
   font-weight: 700;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.05em;
   color: #ffffff;
-  text-shadow: 0 0 12px rgba(255, 255, 255, 0.3);
+  transition: all 0.25s ease;
 }
 
-@keyframes ooklaGlowPulse {
-  0% { box-shadow: 0 0 18px rgba(0, 210, 255, 0.3), inset 0 0 10px rgba(0, 210, 255, 0.15); }
-  50% { box-shadow: 0 0 35px rgba(0, 210, 255, 0.55), inset 0 0 20px rgba(0, 210, 255, 0.3); }
-  100% { box-shadow: 0 0 18px rgba(0, 210, 255, 0.3), inset 0 0 10px rgba(0, 210, 255, 0.15); }
+.ookla-go-btn.connecting .go-text {
+  font-size: 1.15rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: #ffffff;
 }
 
-/* Dashboard en Direct Ookla (Capture 2 & 5) */
+/* Dashboard en Direct Ookla (Capture 2, 4 & 5 Replica au détail près) */
 .ookla-live-dashboard {
   width: 100%;
   animation: fadeIn 0.25s ease;
   padding: 4px 0 16px;
 }
 
-.ookla-top-cols {
-  display: flex;
-  justify-content: space-around;
-  margin-bottom: 14px;
+/* Deux Boîtes / Cartes Supérieures : Descendant & Ascendant */
+.ookla-cards-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-bottom: 12px;
 }
 
-.ookla-top-col {
-  flex: 1;
+.ookla-boxed-card {
+  background: #1c1b30;
+  border: 1px solid #28273e;
+  border-radius: 12px;
+  padding: 12px 14px 10px;
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 3px;
-  opacity: 0.55;
-  transition: opacity 0.25s ease;
+  justify-content: space-between;
+  min-height: 86px;
+  transition: border-color 0.25s ease, box-shadow 0.25s ease, opacity 0.25s ease;
 }
 
-.ookla-top-col.active {
-  opacity: 1;
+.ookla-boxed-card.active#cardDownload {
+  border-color: rgba(37, 202, 249, 0.55);
+  box-shadow: 0 0 16px rgba(37, 202, 249, 0.15);
 }
 
-.ookla-col-title {
+.ookla-boxed-card.active#cardUpload {
+  border-color: rgba(241, 75, 240, 0.55);
+  box-shadow: 0 0 16px rgba(241, 75, 240, 0.15);
+}
+
+.ookla-boxed-card .card-header {
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 0.78rem;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  color: #ffffff;
 }
 
-.arrow-badge {
+.badge-circle {
   width: 17px;
   height: 17px;
   border-radius: 50%;
@@ -920,174 +993,178 @@ body {
   font-weight: 800;
 }
 
-.arrow-badge.down {
-  background: rgba(0, 210, 255, 0.18);
-  color: #00d2ff;
-  border: 1.5px solid #00d2ff;
+.badge-circle.down {
+  background: rgba(37, 202, 249, 0.16);
+  color: #25caf9;
+  border: 1.5px solid #25caf9;
 }
 
-.arrow-badge.up {
-  background: rgba(247, 37, 133, 0.18);
-  color: #f72585;
-  border: 1.5px solid #f72585;
+.badge-circle.up {
+  background: rgba(241, 75, 240, 0.16);
+  color: #f14bf0;
+  border: 1.5px solid #f14bf0;
 }
 
-.col-unit {
-  font-size: 0.68rem;
-  color: #8b94a0;
-  font-weight: 600;
-}
-
-.ookla-col-val {
-  font-family: 'Barlow Semi Condensed', 'Inter', sans-serif;
-  font-size: 1.75rem;
+.card-title {
+  font-size: 0.88rem;
   font-weight: 600;
   color: #ffffff;
-  line-height: 1.1;
-  min-height: 28px;
+  letter-spacing: 0.01em;
 }
 
-.ookla-col-line {
-  width: 44px;
-  height: 3px;
-  border-radius: 2px;
-  margin-top: 3px;
-  opacity: 0;
-  transition: opacity 0.2s ease, width 0.2s ease;
+.card-val-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  gap: 4px;
+  margin-top: 4px;
 }
 
-.ookla-top-col.active .ookla-col-line {
-  opacity: 1;
-  width: 68px;
+.card-num {
+  font-family: 'Barlow Condensed', 'Inter', sans-serif;
+  font-size: 2.3rem;
+  font-weight: 400;
+  color: #ffffff;
+  line-height: 1;
 }
 
-.ookla-col-line.down {
-  background: #00d2ff;
-  box-shadow: 0 0 10px #00d2ff;
+.card-unit {
+  font-size: 0.75rem;
+  color: #7a829e;
+  font-weight: 500;
 }
 
-.ookla-col-line.up {
-  background: #f72585;
-  box-shadow: 0 0 10px #f72585;
-}
-
-/* Ligne Métriques : Ping, Latence Download, Latence Upload (Capture 2 & 5) */
+/* Ligne Métriques : Ping ms ⇆ (idle), ⇆ (down), ⇆ (up) & Gigue ms */
 .ookla-metrics-bar {
   display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 26px;
-  margin: 12px 0 14px;
+  justify-content: space-between;
+  max-width: 380px;
+  margin: 12px auto 14px;
+  padding: 0 8px;
+  width: 100%;
 }
 
-.ookla-ping-title {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #8b94a0;
-}
-
-.ookla-ping-title .ms-unit {
-  font-size: 0.7rem;
-  color: #64748b;
-}
-
-.ookla-metric-item {
+.metric-item-group {
   display: flex;
   align-items: center;
   gap: 6px;
 }
 
-.metric-circle {
-  width: 20px;
-  height: 20px;
-  border-radius: 50%;
+.metric-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #7a829e;
+  letter-spacing: -0.01em;
+}
+
+.metric-label .ms-unit {
+  font-size: 0.70rem;
+  color: #535973;
+}
+
+.metric-item {
   display: flex;
   align-items: center;
+  gap: 5px;
+}
+
+.metric-circle {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  font-size: 0.72rem;
-  font-weight: 800;
+  font-size: 0.65rem;
+  font-weight: 700;
+  line-height: 1;
 }
 
 .metric-circle.ping-yellow {
-  background: rgba(255, 184, 0, 0.16);
-  color: #ffb800;
-  border: 1px solid #ffb800;
+  background: rgba(255, 208, 0, 0.16);
+  color: #ffd000;
+  border: 1px solid #ffd000;
 }
 
 .metric-circle.down-cyan {
-  background: rgba(0, 210, 255, 0.16);
-  color: #00d2ff;
-  border: 1px solid #00d2ff;
+  background: rgba(37, 202, 249, 0.16);
+  color: #25caf9;
+  border: 1px solid #25caf9;
 }
 
 .metric-circle.up-purple {
-  background: rgba(247, 37, 133, 0.16);
-  color: #f72585;
-  border: 1px solid #f72585;
+  background: rgba(151, 76, 237, 0.16);
+  color: #974ced;
+  border: 1px solid #974ced;
+}
+
+.metric-circle.jitter-circle {
+  background: rgba(122, 130, 158, 0.14);
+  color: #7a829e;
+  border: 1px solid rgba(122, 130, 158, 0.35);
+  font-size: 0.82rem;
+  line-height: 0.9;
 }
 
 .metric-num {
   font-family: 'Barlow Semi Condensed', 'Inter', sans-serif;
-  font-size: 1.05rem;
+  font-size: 0.95rem;
   font-weight: 600;
   color: #ffffff;
-  min-width: 20px;
+  min-width: 14px;
 }
 
-/* 4 Tuiles Applications avec 5 points d'évaluation (Capture 2 & 5) */
+/* 4 Tuiles Applications : Web, Gaming, Vidéo, Appels Vidéo */
 .ookla-app-tiles {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 10px;
+  display: flex;
+  justify-content: space-around;
   max-width: 320px;
-  margin: 0 auto 12px;
+  margin: 8px auto 4px;
 }
 
 .app-tile {
-  background: #0f121a;
-  border: 1px solid #1a202d;
-  border-radius: 10px;
-  padding: 8px 6px;
+  background: transparent;
+  border: none;
+  padding: 4px 6px;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 5px;
 }
 
 .tile-icon-box {
-  color: #8b94a0;
-}
-
-.tile-icon-box svg {
-  width: 20px;
-  height: 20px;
+  color: #7a829e;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .tile-dots {
   display: flex;
-  gap: 3px;
-  margin-top: 6px;
+  gap: 3.5px;
 }
 
 .dot {
   width: 4px;
   height: 4px;
   border-radius: 50%;
-  background: #252d3d;
-  transition: all 0.2s ease;
+  background: #2b2e46;
+  transition: all 0.25s ease;
 }
 
 .dot.active {
-  background: #00d2ff;
-  box-shadow: 0 0 6px #00d2ff;
+  background: #ffffff;
+  box-shadow: 0 0 5px rgba(255, 255, 255, 0.8);
 }
 
-/* Speedometer Gauge Ookla Réplique Conforme (Capture 2 & 5) */
+/* Speedometer Gauge Tachymètre épais Ookla (Canvas 260° 8 segments) */
 .ookla-gauge-wrap {
   position: relative;
   width: 100%;
   max-width: 360px;
-  height: 280px;
+  height: 270px;
   margin: 0 auto;
   display: flex;
   align-items: center;
@@ -1096,13 +1173,13 @@ body {
 
 #speedtestGaugeCanvas {
   width: 360px;
-  height: 280px;
+  height: 270px;
   display: block;
 }
 
 .ookla-gauge-center {
   position: absolute;
-  bottom: 24px;
+  bottom: 2px;
   left: 50%;
   transform: translateX(-50%);
   text-align: center;
@@ -1113,50 +1190,66 @@ body {
 }
 
 .ookla-digital-speed {
-  font-family: 'Barlow Semi Condensed', 'Inter', -apple-system, sans-serif;
-  font-size: 3.4rem;
-  font-weight: 500;
+  font-family: 'Barlow Condensed', sans-serif;
+  font-size: 2.75rem;
+  font-weight: 300;
   letter-spacing: -0.02em;
   color: #ffffff;
-  line-height: 1;
+  line-height: 0.90;
 }
 
 .ookla-digital-unit {
   display: flex;
   align-items: center;
   gap: 5px;
-  font-size: 0.85rem;
+  font-size: 0.82rem;
   font-weight: 600;
-  color: #8b94a0;
-  margin-top: 3px;
+  color: #7a829e;
+  margin-top: 4px;
 }
 
 .speed-arrow {
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
   font-weight: 800;
-  font-size: 0.9rem;
 }
 
 .speed-arrow.down {
-  color: #00d2ff;
+  background: rgba(37, 202, 249, 0.18);
+  color: #25caf9;
+  border: 1px solid #25caf9;
 }
 
 .speed-arrow.up {
-  color: #f72585;
+  background: rgba(241, 75, 240, 0.18);
+  color: #f14bf0;
+  border: 1px solid #f14bf0;
+}
+
+.speed-arrow.ping {
+  background: rgba(255, 208, 0, 0.18);
+  color: #ffd000;
+  border: 1px solid #ffd000;
 }
 
 .speed-unit-text {
-  color: #8b94a0;
-  letter-spacing: 0.05em;
+  color: #7a829e;
+  letter-spacing: 0.04em;
 }
 
-/* Ligne ISP & Serveur sous la jauge (Capture 2 & 5) */
+/* Ligne ISP & Serveur sous la jauge */
 .ookla-provider-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
   width: 100%;
   max-width: 360px;
-  margin: 14px auto 10px;
+  margin: 12px auto 6px;
   padding: 0 4px;
 }
 
@@ -1167,33 +1260,27 @@ body {
 .ookla-prov-col {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
 }
 
 .ookla-prov-col.align-right {
-  flex-direction: row-reverse;
-  text-align: right;
+  flex-direction: row;
+  text-align: left;
 }
 
 .ookla-avatar-icon {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: #11151e;
-  border: 1px solid #1f2738;
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: transparent;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #8b94a0;
-}
-
-.ookla-avatar-icon svg {
-  width: 17px;
-  height: 17px;
+  color: #7a829e;
 }
 
 .ookla-prov-meta strong {
-  font-size: 0.88rem;
+  font-size: 0.85rem;
   font-weight: 700;
   color: #ffffff;
   display: block;
@@ -1201,17 +1288,25 @@ body {
 
 .ookla-prov-meta span {
   font-size: 0.74rem;
-  color: #8b94a0;
+  color: #7a829e;
   display: block;
+}
+
+.ookla-test-id-row {
+  text-align: center;
+  font-size: 0.72rem;
+  color: #535973;
+  margin-top: 6px;
+  letter-spacing: 0.04em;
 }
 
 /* Barre de progression continue Ookla (Bas de page) */
 .ookla-progress-track {
   width: 100%;
   max-width: 360px;
-  margin: 10px auto 0;
-  height: 3.5px;
-  background: #12151e;
+  margin: 8px auto 0;
+  height: 2.5px;
+  background: #1c1b30;
   border-radius: 2px;
   overflow: hidden;
 }
@@ -1223,20 +1318,54 @@ body {
 }
 
 .ookla-progress-bar.down {
-  background: #00d2ff;
-  box-shadow: 0 0 10px #00d2ff;
+  background: #25caf9;
+  box-shadow: 0 0 10px #25caf9;
 }
 
 .ookla-progress-bar.up {
-  background: #f72585;
-  box-shadow: 0 0 10px #f72585;
+  background: #f14bf0;
+  box-shadow: 0 0 10px #f14bf0;
 }
 
 .ookla-end-actions {
   display: flex;
   justify-content: center;
   gap: 12px;
-  margin-top: 18px;
+  margin-top: 16px;
+}
+
+.btn-primary-ookla {
+  background: #1c1b30;
+  border: 1px solid #383556;
+  color: #ffffff;
+  border-radius: 20px;
+  padding: 9px 24px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-primary-ookla:hover {
+  border-color: #25caf9;
+  box-shadow: 0 0 12px rgba(37, 202, 249, 0.3);
+}
+
+.btn-secondary-ookla {
+  background: transparent;
+  border: 1px solid #28273e;
+  color: #7a829e;
+  border-radius: 20px;
+  padding: 9px 18px;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-secondary-ookla:hover {
+  color: #ffffff;
+  border-color: #383556;
 }
 
 .speedtest-history-card {
@@ -1250,3 +1379,5 @@ body {
   align-items: center;
 }
 
+
+#tabSpeedtest .install-banner, .tab-content.active#tabSpeedtest ~ .install-banner { display: none !important; }
